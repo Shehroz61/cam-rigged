@@ -130,8 +130,7 @@ export default function ViewContentPage() {
       <main className="flex-1 flex items-center justify-center overflow-hidden">
         {contentUrl && (
           <SecureViewer 
-            url={contentUrl} 
-            type={contentUrl.match(/\.(mp4|webm|ogg|mov)$/i) ? 'video' : 'pdf'} 
+            contentUrl={contentUrl} 
           />
         )}
       </main>
