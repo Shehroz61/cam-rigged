@@ -30,6 +30,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const verifyDevice = async (currentUser: User) => {
+      // Admin bypass: Skip device lock for admin emails
+      const ADMIN_EMAIL = 'shehrozhameed61@gmail.com';
+      const isAdmin = currentUser.email === ADMIN_EMAIL || currentUser.email?.startsWith('shehrozhameed61+');
+      
+      if (isAdmin) {
+        console.log('Admin bypass: Skipping device lock verification.');
+        setIsLoading(false);
+        return;
+      }
+
       try {
         const fp = await fpPromise.load();
         const result = await fp.get();

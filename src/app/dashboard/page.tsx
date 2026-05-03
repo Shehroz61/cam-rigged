@@ -336,15 +336,13 @@ function OrdersTab({ orders, expandedOrder, setExpandedOrder }: {
                 )}
 
                 {order.status === 'approved' && order.products?.encrypted_content_url && (
-                  <a
-                    href={order.products.encrypted_content_url}
-                    target="_blank"
-                    rel="noreferrer"
+                  <Link
+                    href={`/view/${order.product_id}`}
                     className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-blue-500/20"
                   >
                     <Play size={14} />
                     Access Content
-                  </a>
+                  </Link>
                 )}
 
                 {order.status === 'rejected' && (

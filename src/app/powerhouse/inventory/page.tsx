@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Upload, Trash2, FileText, Video, Plus, Package } from 'lucide-react';
+import { Upload, Trash2, FileText, Video, Plus, Package, Edit2 } from 'lucide-react';
 
 interface Product {
   id: string;
@@ -31,6 +31,7 @@ export default function InventoryPage() {
     type: 'Single',
   });
   const [file, setFile] = useState<File | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
   const fetchProducts = useCallback(async () => {
@@ -50,55 +51,125 @@ export default function InventoryPage() {
   const handleDelete = async (product: Product) => {
     if (!confirm(`Delete "${product.name}"? This cannot be undone.`)) return;
     setDeletingId(product.id);
+    console.log("Attempting to delete product:", product.id);
+
     try {
-      // Delete file from storage
+      // 1. Delete file from storage if it exists
       if (product.encrypted_content_url) {
-        const url = new URL(product.encrypted_content_url);
-        const pathParts = url.pathname.split('/object/public/content/');
-        if (pathParts[1]) {
-          await supabase.storage.from('content').remove([pathParts[1]]);
+        try {
+          const url = new URL(product.encrypted_content_url);
+          // More robust way to get the filename regardless of public/private path
+          const pathSegments = url.pathname.split('/');
+          const fileName = pathSegments[pathSegments.length - 1];
+          
+          console.log("Attempting to delete file from storage:", fileName);
+          const { error: storageError } = await supabase.storage
+            .from('content')
+            .remove([fileName]);
+          
+          if (storageError) {
+            console.error("Storage deletion error:", storageError);
+            // We continue anyway to try and delete the DB record
+          } else {
+            console.log("File deleted from storage successfully");
+          }
+        } catch (urlErr) {
+          console.error("Error parsing URL for deletion:", urlErr);
         }
       }
-      // Delete from DB
-      await supabase.from('products').delete().eq('id', product.id);
+
+      // 2. Delete from Database
+      const { error: dbError } = await supabase
+        .from('products')
+        .delete()
+        .eq('id', product.id);
+
+      if (dbError) {
+        throw dbError;
+      }
+
+      console.log("Product deleted from database successfully");
       await fetchProducts();
     } catch (err: any) {
-      alert(`Failed to delete: ${err.message}`);
+      console.error("Full deletion error:", err);
+      alert(`Failed to delete: ${err.message || "Check console for details"}`);
     } finally {
       setDeletingId(null);
     }
   };
 
-  const handleAddProduct = async (e: React.FormEvent) => {
+  const handleEdit = (product: Product) => {
+    setEditingId(product.id);
+    setNewProduct({
+      name: product.name,
+      category: product.category,
+      description: product.description || '',
+      price_pkr: product.price_pkr.toString(),
+      price_usdt: product.price_usdt.toString(),
+      type: product.type,
+    });
+    setFile(null);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancel = () => {
+    setEditingId(null);
+    setNewProduct({ name: '', category: 'O Level', description: '', price_pkr: '', price_usdt: '', type: 'Single' });
+    setFile(null);
+    setShowForm(false);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProduct.name || !newProduct.price_pkr || !newProduct.price_usdt || !file) {
-      alert('Please fill all fields and attach a file (PDF/Video).');
+    
+    // File is required only for NEW products
+    if (!newProduct.name || !newProduct.price_pkr || !newProduct.price_usdt) {
+      alert('Please fill all required fields.');
       return;
     }
+    
+    if (!editingId && !file) {
+      alert('Please attach a file for new content.');
+      return;
+    }
+
     setIsUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage.from('content').upload(fileName, file);
-      if (uploadError) throw new Error(`Upload Failed: ${uploadError.message}`);
+      let finalUrl = editingId ? products.find(p => p.id === editingId)?.encrypted_content_url || null : null;
 
-      const { data: urlData } = supabase.storage.from('content').getPublicUrl(fileName);
+      if (file) {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('content').upload(fileName, file);
+        if (uploadError) throw new Error(`Upload Failed: ${uploadError.message}`);
 
-      const { error: dbError } = await supabase.from('products').insert({
+        const { data: urlData } = supabase.storage.from('content').getPublicUrl(fileName);
+        finalUrl = urlData.publicUrl;
+      }
+
+      const productData = {
         name: newProduct.name,
         category: newProduct.category,
         description: newProduct.description,
         price_pkr: Number(newProduct.price_pkr),
         price_usdt: Number(newProduct.price_usdt),
         type: newProduct.type,
-        encrypted_content_url: urlData.publicUrl,
-      });
+        encrypted_content_url: finalUrl,
+      };
 
-      if (dbError) throw dbError;
+      if (editingId) {
+        const { error: dbError } = await supabase
+          .from('products')
+          .update(productData)
+          .eq('id', editingId);
+        if (dbError) throw dbError;
+      } else {
+        const { error: dbError } = await supabase.from('products').insert(productData);
+        if (dbError) throw dbError;
+      }
 
-      setNewProduct({ name: '', category: 'O Level', description: '', price_pkr: '', price_usdt: '', type: 'Single' });
-      setFile(null);
-      setShowForm(false);
+      handleCancel();
       await fetchProducts();
     } catch (err: any) {
       alert(err.message);
@@ -122,24 +193,30 @@ export default function InventoryPage() {
           <p className="text-gray-400 mt-1">Manage your study resource catalog.</p>
         </div>
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={() => {
+            if (showForm && editingId) {
+              handleCancel();
+            } else {
+              setShowForm(!showForm);
+              if (!showForm) setEditingId(null);
+            }
+          }}
           className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl transition-all shadow-lg shadow-blue-500/20"
         >
-          <Plus size={16} />
-          Add Product
+          {showForm ? 'Close Form' : <><Plus size={16} /> Add Product</>}
         </button>
       </div>
 
       {/* Upload Form */}
       {showForm && (
-        <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6">
+        <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 ring-1 ring-blue-500/30">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-              <Upload size={15} className="text-white" />
+              {editingId ? <Edit2 size={15} className="text-white" /> : <Upload size={15} className="text-white" />}
             </div>
-            <h2 className="text-lg font-bold text-white">Upload New Content</h2>
+            <h2 className="text-lg font-bold text-white">{editingId ? 'Edit Product' : 'Upload New Content'}</h2>
           </div>
-          <form onSubmit={handleAddProduct} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-gray-400 mb-1.5">Product Name *</label>
               <input
@@ -207,14 +284,19 @@ export default function InventoryPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm text-gray-400 mb-1.5">Content File (PDF/Video) *</label>
+              <label className="block text-sm text-gray-400 mb-1.5">
+                Content File {editingId ? '(Optional)' : '(PDF/Video) *'}
+              </label>
               <input
                 type="file"
-                required
+                required={!editingId}
                 accept=".pdf,.mp4,.mov,.avi,.webm"
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700 transition"
               />
+              {editingId && (
+                <p className="text-xs text-gray-500 mt-1">Leave empty to keep current file.</p>
+              )}
             </div>
             <div className="md:col-span-2 flex gap-3">
               <button
@@ -222,11 +304,11 @@ export default function InventoryPage() {
                 disabled={isUploading}
                 className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 px-6 py-3 rounded-xl font-bold text-white transition-all shadow-lg shadow-green-500/20"
               >
-                {isUploading ? 'Uploading...' : 'Add Product to Store'}
+                {isUploading ? 'Saving...' : editingId ? 'Update Product' : 'Add Product to Store'}
               </button>
               <button
                 type="button"
-                onClick={() => setShowForm(false)}
+                onClick={handleCancel}
                 className="px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-xl font-medium text-gray-300 transition"
               >
                 Cancel
@@ -309,14 +391,23 @@ export default function InventoryPage() {
                       {new Date(product.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4">
-                      <button
-                        disabled={deletingId === product.id}
-                        onClick={() => handleDelete(product)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-red-900/30 hover:bg-red-900/60 text-red-400 border border-red-900/50 rounded-lg text-xs font-medium transition disabled:opacity-40"
-                      >
-                        <Trash2 size={12} />
-                        {deletingId === product.id ? 'Deleting...' : 'Delete'}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleEdit(product)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-900/30 hover:bg-blue-900/60 text-blue-400 border border-blue-900/50 rounded-lg text-xs font-medium transition"
+                        >
+                          <Edit2 size={12} />
+                          Edit
+                        </button>
+                        <button
+                          disabled={deletingId === product.id}
+                          onClick={() => handleDelete(product)}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-red-900/30 hover:bg-red-900/60 text-red-400 border border-red-900/50 rounded-lg text-xs font-medium transition disabled:opacity-40"
+                        >
+                          <Trash2 size={12} />
+                          {deletingId === product.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
