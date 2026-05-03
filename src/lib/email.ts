@@ -3,10 +3,15 @@ import { Resend } from 'resend';
 // Initialize Resend lazily to avoid build-time errors
 const getResend = () => {
   const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey && typeof window === 'undefined') {
-    console.warn('RESEND_API_KEY is missing');
+  if (!apiKey) {
+    // Return a mock object if API key is missing during build
+    return {
+      emails: {
+        send: async () => ({ id: 'mock-id' })
+      }
+    } as any;
   }
-  return new Resend(apiKey || 'placeholder');
+  return new Resend(apiKey);
 };
 
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'CamRigged <noreply@camrigged.com>';
