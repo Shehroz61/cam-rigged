@@ -327,7 +327,7 @@ export default function InventoryPage() {
         <div className="text-center py-16 bg-gray-900 border border-gray-800 rounded-xl">
           <Package size={32} className="text-gray-600 mx-auto mb-3" />
           <p className="text-gray-400 font-medium">No products yet</p>
-          <p className="text-gray-600 text-sm mt-1">Click "Add Product" to upload your first resource.</p>
+          <p className="text-gray-600 text-sm mt-1">Click &quot;Add Product&quot; to upload your first resource.</p>
         </div>
       ) : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">

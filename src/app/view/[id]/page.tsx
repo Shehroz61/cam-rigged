@@ -27,8 +27,10 @@ export default function ViewContentPage() {
     }
 
     if (isDeviceLocked) {
-      setError('DEVICE_LOCKED');
-      setLoading(false);
+      setTimeout(() => {
+        setError('DEVICE_LOCKED');
+        setLoading(false);
+      }, 0);
       return;
     }
 
@@ -108,7 +110,7 @@ export default function ViewContentPage() {
           <AlertCircle size={48} className="text-yellow-500 mx-auto mb-4" />
           <h1 className="text-2xl font-bold text-white mb-2">No Access</h1>
           <p className="text-gray-400 mb-6">
-            You don't have an approved order for this content.
+            You don&apos;t have an approved order for this content.
           </p>
           <Link href="/" className="px-6 py-2 bg-blue-600 rounded-lg font-bold">Go to Store</Link>
         </div>
