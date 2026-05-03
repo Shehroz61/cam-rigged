@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import fpPromise from '@fingerprintjs/fingerprintjs';
 import { Session, User } from '@supabase/supabase-js';
 
 interface AuthContextType {
@@ -41,6 +40,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       try {
+        const fpPromise = (await import('@fingerprintjs/fingerprintjs')).default;
         const fp = await fpPromise.load();
         const result = await fp.get();
         const visitorId = result.visitorId;
