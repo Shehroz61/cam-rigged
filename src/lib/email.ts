@@ -1,6 +1,14 @@
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Initialize Resend lazily to avoid build-time errors
+const getResend = () => {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey && typeof window === 'undefined') {
+    console.warn('RESEND_API_KEY is missing');
+  }
+  return new Resend(apiKey || 'placeholder');
+};
+
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'CamRigged <noreply@camrigged.com>';
 
 interface OrderEmailData {
@@ -68,7 +76,7 @@ export async function sendOrderReceivedEmail(data: OrderEmailData) {
     <p style="margin:0 0 8px;color:#94a3b8;font-size:14px;">⏱️ Our team verifies payments within <strong style="color:#f1f5f9;">24 hours</strong>. You'll receive another email once your order is approved.</p>
     <p style="margin:0;color:#94a3b8;font-size:14px;">You can check your order status anytime in your <a href="${process.env.NEXT_PUBLIC_SITE_URL || 'https://camrigged.com'}/dashboard" style="color:#3b82f6;text-decoration:none;font-weight:600;">Dashboard</a>.</p>
   `;
-  return resend.emails.send({
+  return getResend().emails.send({
     from: FROM_EMAIL,
     to: data.toEmail,
     subject: `✅ Order Received — ${data.productName}`,
@@ -97,7 +105,7 @@ export async function sendOrderApprovedEmail(data: OrderEmailData) {
     </div>
     ${data.notes ? `<p style="margin:24px 0 0;color:#94a3b8;font-size:13px;font-style:italic;">Note from admin: ${data.notes}</p>` : ''}
   `;
-  return resend.emails.send({
+  return getResend().emails.send({
     from: FROM_EMAIL,
     to: data.toEmail,
     subject: `🎓 Your Order is Approved — ${data.productName}`,
@@ -130,7 +138,7 @@ export async function sendOrderRejectedEmail(data: OrderEmailData) {
       </a>
     </div>
   `;
-  return resend.emails.send({
+  return getResend().emails.send({
     from: FROM_EMAIL,
     to: data.toEmail,
     subject: `❌ Order Rejected — Action Required`,
@@ -151,7 +159,7 @@ export async function sendWelcomeEmail(toEmail: string) {
       </a>
     </div>
   `;
-  return resend.emails.send({
+  return getResend().emails.send({
     from: FROM_EMAIL,
     to: toEmail,
     subject: `Welcome to CamRigged — Your Path to A*s Starts Here`,
