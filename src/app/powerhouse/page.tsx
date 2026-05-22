@@ -2,49 +2,48 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { TrendingUp, ShoppingCart, Package, Users, Clock, CheckCircle, XCircle } from 'lucide-react';
 import Link from 'next/link';
+import { Zap, Package, ShoppingCart, Users, TrendingUp, Edit2, Trash2, Plus, Tag } from 'lucide-react';
 
 export default function PowerhousePage() {
   const [stats, setStats] = useState({
-    totalRevenuePkr: 0,
-    totalRevenueUsdt: 0,
+    totalRevenue: 0,
     pendingOrders: 0,
     approvedOrders: 0,
-    rejectedOrders: 0,
+    deliveredOrders: 0,
     totalProducts: 0,
-    totalUsers: 0,
+    totalBundles: 0,
+    totalCategories: 0,
   });
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchStats() {
-      const [ordersRes, productsRes, usersRes] = await Promise.all([
-        supabase.from('orders').select('*, products(name, price_pkr, price_usdt)'),
+      const [ordersRes, productsRes, bundlesRes, categoriesRes] = await Promise.all([
+        supabase.from('orders').select('id, status, total_amount, customer_name, created_at'),
         supabase.from('products').select('id', { count: 'exact', head: true }),
-        supabase.from('user_devices').select('user_id', { count: 'exact', head: true }),
+        supabase.from('bundles').select('id', { count: 'exact', head: true }),
+        supabase.from('categories').select('id', { count: 'exact', head: true }),
       ]);
 
       const allOrders = ordersRes.data || [];
       const approved = allOrders.filter((o) => o.status === 'approved');
       const pending = allOrders.filter((o) => o.status === 'pending');
-      const rejected = allOrders.filter((o) => o.status === 'rejected');
+      const delivered = allOrders.filter((o) => o.status === 'delivered');
 
-      const totalRevenuePkr = approved.reduce((s, o) => s + Number(o.products?.price_pkr || 0), 0);
-      const totalRevenueUsdt = approved.reduce((s, o) => s + Number(o.products?.price_usdt || 0), 0);
+      const totalRevenue = approved.reduce((s, o) => s + Number(o.total_amount || 0), 0);
 
       setStats({
-        totalRevenuePkr,
-        totalRevenueUsdt,
+        totalRevenue,
         pendingOrders: pending.length,
         approvedOrders: approved.length,
-        rejectedOrders: rejected.length,
+        deliveredOrders: delivered.length,
         totalProducts: productsRes.count || 0,
-        totalUsers: usersRes.count || 0,
+        totalBundles: bundlesRes.count || 0,
+        totalCategories: categoriesRes.count || 0,
       });
 
-      // Recent 5 orders
       const recent = allOrders
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         .slice(0, 5);
@@ -56,40 +55,19 @@ export default function PowerhousePage() {
 
   const statCards = [
     {
-      label: 'Revenue (PKR)',
-      value: `Rs. ${stats.totalRevenuePkr.toLocaleString()}`,
+      label: 'Revenue',
+      value: `Rs. ${stats.totalRevenue.toLocaleString()}`,
       icon: TrendingUp,
       color: 'from-green-500 to-emerald-600',
       bg: 'bg-green-500/10 border-green-500/20',
     },
     {
-      label: 'Revenue (USDT)',
-      value: `$${stats.totalRevenueUsdt.toFixed(2)}`,
-      icon: TrendingUp,
-      color: 'from-teal-500 to-cyan-600',
-      bg: 'bg-teal-500/10 border-teal-500/20',
-    },
-    {
       label: 'Pending Orders',
       value: stats.pendingOrders,
-      icon: Clock,
+      icon: ShoppingCart,
       color: 'from-yellow-500 to-orange-500',
       bg: 'bg-yellow-500/10 border-yellow-500/20',
       href: '/powerhouse/orders',
-    },
-    {
-      label: 'Approved Orders',
-      value: stats.approvedOrders,
-      icon: CheckCircle,
-      color: 'from-green-500 to-emerald-500',
-      bg: 'bg-green-500/10 border-green-500/20',
-    },
-    {
-      label: 'Rejected Orders',
-      value: stats.rejectedOrders,
-      icon: XCircle,
-      color: 'from-red-500 to-rose-600',
-      bg: 'bg-red-500/10 border-red-500/20',
     },
     {
       label: 'Products',
@@ -99,14 +77,29 @@ export default function PowerhousePage() {
       bg: 'bg-blue-500/10 border-blue-500/20',
       href: '/powerhouse/inventory',
     },
+    {
+      label: 'Bundles',
+      value: stats.totalBundles,
+      icon: Tag,
+      color: 'from-purple-500 to-pink-600',
+      bg: 'bg-purple-500/10 border-purple-500/20',
+      href: '/powerhouse/bundles',
+    },
+    {
+      label: 'Categories',
+      value: stats.totalCategories,
+      icon: Tag,
+      color: 'from-cyan-500 to-blue-600',
+      bg: 'bg-cyan-500/10 border-cyan-500/20',
+      href: '/powerhouse/categories',
+    },
   ];
 
   return (
     <div className="space-y-8">
-      {/* Page Header */}
       <div>
-        <h1 className="text-3xl font-extrabold text-white">Overview</h1>
-        <p className="text-gray-400 mt-1">Welcome back, Admin. Here's what's happening.</p>
+        <h1 className="text-3xl font-extrabold text-white">Admin Dashboard</h1>
+        <p className="text-gray-400 mt-1">Manage your store, products, and orders.</p>
       </div>
 
       {loading ? (
@@ -115,7 +108,6 @@ export default function PowerhousePage() {
         </div>
       ) : (
         <>
-          {/* Stats Grid */}
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
             {statCards.map((card) => {
               const Icon = card.icon;
@@ -140,14 +132,13 @@ export default function PowerhousePage() {
             })}
           </div>
 
-          {/* Quick Actions */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Link
               href="/powerhouse/orders"
               className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-yellow-500/40 hover:bg-yellow-500/5 transition-all group"
             >
               <ShoppingCart size={20} className="text-yellow-400 mb-3 group-hover:scale-110 transition-transform" />
-              <h3 className="font-bold text-white">Review Orders</h3>
+              <h3 className="font-bold text-white">Manage Orders</h3>
               <p className="text-sm text-gray-400 mt-1">{stats.pendingOrders} orders need attention</p>
             </Link>
             <Link
@@ -155,20 +146,19 @@ export default function PowerhousePage() {
               className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-blue-500/40 hover:bg-blue-500/5 transition-all group"
             >
               <Package size={20} className="text-blue-400 mb-3 group-hover:scale-110 transition-transform" />
-              <h3 className="font-bold text-white">Manage Inventory</h3>
-              <p className="text-sm text-gray-400 mt-1">Upload, view & delete products</p>
+              <h3 className="font-bold text-white">Manage Products</h3>
+              <p className="text-sm text-gray-400 mt-1">Add, edit & delete products</p>
             </Link>
             <Link
-              href="/powerhouse/users"
+              href="/powerhouse/bundles"
               className="bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-purple-500/40 hover:bg-purple-500/5 transition-all group"
             >
-              <Users size={20} className="text-purple-400 mb-3 group-hover:scale-110 transition-transform" />
-              <h3 className="font-bold text-white">User Management</h3>
-              <p className="text-sm text-gray-400 mt-1">Manage devices & registrations</p>
+              <Tag size={20} className="text-purple-400 mb-3 group-hover:scale-110 transition-transform" />
+              <h3 className="font-bold text-white">Manage Bundles</h3>
+              <p className="text-sm text-gray-400 mt-1">Create discount bundles</p>
             </Link>
           </div>
 
-          {/* Recent Orders */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
               <h2 className="font-bold text-white">Recent Orders</h2>
@@ -180,9 +170,8 @@ export default function PowerhousePage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-gray-500 text-xs uppercase border-b border-gray-800">
-                    <th className="px-6 py-3 text-left">Product</th>
+                    <th className="px-6 py-3 text-left">Customer</th>
                     <th className="px-6 py-3 text-left">Amount</th>
-                    <th className="px-6 py-3 text-left">TID</th>
                     <th className="px-6 py-3 text-left">Status</th>
                     <th className="px-6 py-3 text-left">Date</th>
                   </tr>
@@ -190,19 +179,19 @@ export default function PowerhousePage() {
                 <tbody>
                   {recentOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-6 py-8 text-center text-gray-500">No orders yet.</td>
+                      <td colSpan={4} className="px-6 py-8 text-center text-gray-500">No orders yet.</td>
                     </tr>
                   ) : (
                     recentOrders.map((order) => (
                       <tr key={order.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                        <td className="px-6 py-3 font-medium text-white">{order.products?.name || '—'}</td>
-                        <td className="px-6 py-3 text-gray-300">Rs. {order.amount}</td>
-                        <td className="px-6 py-3 text-gray-400 font-mono text-xs">{order.transaction_id}</td>
+                        <td className="px-6 py-3 font-medium text-white">{order.customer_name || '—'}</td>
+                        <td className="px-6 py-3 text-gray-300">Rs. {order.total_amount}</td>
                         <td className="px-6 py-3">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                             order.status === 'approved' ? 'bg-green-900/50 text-green-400 border border-green-800' :
-                            order.status === 'rejected' ? 'bg-red-900/50 text-red-400 border border-red-800' :
-                            'bg-yellow-900/50 text-yellow-400 border border-yellow-800'
+                            order.status === 'delivered' ? 'bg-blue-900/50 text-blue-400 border border-blue-800' :
+                            order.status === 'pending' ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-800' :
+                            'bg-red-900/50 text-red-400 border border-red-800'
                           }`}>
                             {order.status.toUpperCase()}
                           </span>

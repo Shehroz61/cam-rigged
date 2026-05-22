@@ -1,20 +1,19 @@
 'use client';
 
-import { useAuth } from '@/context/AuthContext';
 import { useRouter, usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { supabase } from '@/lib/supabase';
 import {
   LayoutDashboard,
   ShoppingCart,
   Package,
-  Users,
   Settings,
-  BarChart3,
   LogOut,
   Menu,
-  X,
   Zap,
+  Tag,
+  Truck,
 } from 'lucide-react';
 
 const ADMIN_EMAIL = 'shehrozhameed61@gmail.com';
@@ -22,32 +21,46 @@ const ADMIN_EMAIL = 'shehrozhameed61@gmail.com';
 const NAV_ITEMS = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, href: '/powerhouse' },
   { id: 'orders', label: 'Orders', icon: ShoppingCart, href: '/powerhouse/orders' },
-  { id: 'inventory', label: 'Inventory', icon: Package, href: '/powerhouse/inventory' },
-  { id: 'users', label: 'Users', icon: Users, href: '/powerhouse/users' },
-  { id: 'analytics', label: 'Analytics', icon: BarChart3, href: '/powerhouse/analytics' },
+  { id: 'inventory', label: 'Products', icon: Package, href: '/powerhouse/inventory' },
+  { id: 'bundles', label: 'Bundles', icon: Tag, href: '/powerhouse/bundles' },
+  { id: 'categories', label: 'Categories', icon: Tag, href: '/powerhouse/categories' },
   { id: 'settings', label: 'Settings', icon: Settings, href: '/powerhouse/settings' },
 ];
 
 export default function PowerhouseLayout({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isLoading) {
-      if (!user) {
-        router.replace('/');
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.email) {
+        setAdminEmail(session.user.email);
       } else {
-        const isAdmin = user.email === ADMIN_EMAIL || user.email?.startsWith('shehrozhameed61+');
-        if (!isAdmin) {
-          router.replace('/');
-        }
+        router.replace('/admin/login');
       }
-    }
-  }, [user, isLoading, router]);
+    };
+    checkAuth();
 
-  if (isLoading || !user || !(user.email === ADMIN_EMAIL || user.email?.startsWith('shehrozhameed61+'))) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user?.email) {
+        setAdminEmail(session.user.email);
+      } else {
+        router.replace('/admin/login');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [router]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/admin/login');
+  };
+
+  if (!adminEmail) {
     return (
       <div className="min-h-screen bg-gray-950 flex items-center justify-center text-white">
         <div className="flex flex-col items-center gap-4">
@@ -56,6 +69,13 @@ export default function PowerhouseLayout({ children }: { children: React.ReactNo
         </div>
       </div>
     );
+  }
+
+  const isAdmin = adminEmail === ADMIN_EMAIL || adminEmail.startsWith('shehrozhameed61+');
+  
+  if (!isAdmin) {
+    router.replace('/admin/login');
+    return null;
   }
 
   return (
@@ -118,16 +138,16 @@ export default function PowerhouseLayout({ children }: { children: React.ReactNo
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-white truncate">Admin</p>
-              <p className="text-xs text-gray-500 truncate">{user.email}</p>
+              <p className="text-xs text-gray-500 truncate">{adminEmail}</p>
             </div>
           </div>
-          <Link
-            href="/"
+          <button
+            onClick={handleLogout}
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-gray-800 transition-all w-full"
           >
             <LogOut size={16} />
-            Back to Store
-          </Link>
+            Logout
+          </button>
         </div>
       </aside>
 

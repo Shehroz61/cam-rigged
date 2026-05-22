@@ -2,23 +2,31 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { CheckCircle, XCircle, SkipForward, ExternalLink, RefreshCw, Filter } from 'lucide-react';
-import Image from 'next/image';
+import { CheckCircle, XCircle, SkipForward, RefreshCw, Filter, Truck, Package, Printer } from 'lucide-react';
 
-type OrderStatus = 'pending' | 'approved' | 'rejected' | 'all';
+type OrderStatus = 'pending' | 'approved' | 'shipped' | 'delivered' | 'cancelled' | 'all';
 
 interface Order {
   id: string;
-  user_id: string;
-  product_id: string;
-  amount: number;
-  transaction_id: string;
-  screenshot_url: string;
-  status: 'pending' | 'approved' | 'rejected';
+  customer_name: string;
+  customer_email: string | null;
+  customer_phone: string;
+  delivery_address: string;
+  city: string;
+  postal_code: string | null;
+  product_ids: string[];
+  bundle_ids: string[] | null;
+  subtotal: number;
+  discount_amount: number;
+  total_amount: number;
+  transaction_id: string | null;
+  screenshot_url: string | null;
+  payment_method: string | null;
+  status: 'pending' | 'approved' | 'shipped' | 'delivered' | 'cancelled';
+  tracking_number: string | null;
   notes: string | null;
   created_at: string;
-  products: { name: string; price_pkr: number; price_usdt: number } | null;
-  user_email?: string;
+  item_details?: any;
 }
 
 export default function OrdersPage() {
@@ -27,16 +35,14 @@ export default function OrdersPage() {
   const [filter, setFilter] = useState<OrderStatus>('pending');
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
-
-  // Reject modal state
-  const [rejectModal, setRejectModal] = useState<{ orderId: string; userEmail: string; productName: string } | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
+  const [actionModal, setActionModal] = useState<{ orderId: string; action: 'shipped' | 'delivered' | 'cancelled' } | null>(null);
+  const [trackingNumber, setTrackingNumber] = useState('');
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     let query = supabase
       .from('orders')
-      .select('*, products(name, price_pkr, price_usdt)')
+      .select('*')
       .order('created_at', { ascending: false });
 
     if (filter !== 'all') {
@@ -45,9 +51,10 @@ export default function OrdersPage() {
 
     const { data, error } = await query;
     if (!error && data) {
+      console.log('Fetched orders:', data);
       setOrders(data as Order[]);
     }
-    setSkipped(new Set()); // Reset skipped on refresh
+    setSkipped(new Set());
     setLoading(false);
   }, [filter]);
 
@@ -55,44 +62,36 @@ export default function OrdersPage() {
     fetchOrders();
   }, [fetchOrders]);
 
-  const handleAction = async (order: Order, action: 'approved' | 'rejected', notes?: string) => {
+  const handleAction = async (order: Order, newStatus: OrderStatus, notes?: string) => {
     setProcessing(order.id);
     try {
+      const updateData: any = { status: newStatus };
+      
+      if (newStatus === 'shipped' && trackingNumber) {
+        updateData.tracking_number = trackingNumber;
+      }
+
       await supabase
         .from('orders')
-        .update({ status: action, notes: notes || null })
+        .update(updateData)
         .eq('id', order.id);
 
-      // Fire email
-      await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: action === 'approved' ? 'order_approved' : 'order_rejected',
-          toEmail: order.user_email || '',
-          productName: order.products?.name || 'your product',
-          amount: order.amount,
-          transactionId: order.transaction_id,
-          orderId: order.id,
-          notes: notes || '',
-        }),
-      });
+      if (notes) {
+        await supabase.from('order_tracking').insert({
+          order_id: order.id,
+          status: newStatus,
+          message: notes,
+        });
+      }
 
       await fetchOrders();
+      setActionModal(null);
+      setTrackingNumber('');
     } catch (err) {
       console.error(err);
     } finally {
       setProcessing(null);
     }
-  };
-
-  const handleRejectSubmit = async () => {
-    if (!rejectModal) return;
-    const order = orders.find((o) => o.id === rejectModal.orderId);
-    if (!order) return;
-    setRejectModal(null);
-    await handleAction(order, 'rejected', rejectReason);
-    setRejectReason('');
   };
 
   const handleSkip = (orderId: string) => {
@@ -101,20 +100,23 @@ export default function OrdersPage() {
 
   const visibleOrders = orders.filter((o) => !skipped.has(o.id));
 
+  const [printOrder, setPrintOrder] = useState<Order | null>(null);
+
   const filterTabs: { label: string; value: OrderStatus; color: string }[] = [
     { label: 'Pending', value: 'pending', color: 'border-yellow-500 text-yellow-400' },
     { label: 'Approved', value: 'approved', color: 'border-green-500 text-green-400' },
-    { label: 'Rejected', value: 'rejected', color: 'border-red-500 text-red-400' },
-    { label: 'All Orders', value: 'all', color: 'border-blue-500 text-blue-400' },
+    { label: 'Shipped', value: 'shipped', color: 'border-blue-500 text-blue-400' },
+    { label: 'Delivered', value: 'delivered', color: 'border-purple-500 text-purple-400' },
+    { label: 'Cancelled', value: 'cancelled', color: 'border-red-500 text-red-400' },
+    { label: 'All Orders', value: 'all', color: 'border-gray-500 text-gray-400' },
   ];
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-extrabold text-white">Order Vault</h1>
-          <p className="text-gray-400 mt-1">Review, approve, or reject customer payment submissions.</p>
+          <h1 className="text-3xl font-extrabold text-white">Order Management</h1>
+          <p className="text-gray-400 mt-1">Process and track customer orders.</p>
         </div>
         <button
           onClick={fetchOrders}
@@ -125,7 +127,6 @@ export default function OrdersPage() {
         </button>
       </div>
 
-      {/* Filter Tabs */}
       <div className="flex gap-2 flex-wrap">
         {filterTabs.map((tab) => (
           <button
@@ -142,11 +143,10 @@ export default function OrdersPage() {
         ))}
       </div>
 
-      {/* Skipped Banner */}
       {skipped.size > 0 && (
         <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-lg px-4 py-3 flex items-center justify-between">
           <p className="text-yellow-400 text-sm">
-            {skipped.size} order(s) skipped (hidden from view, still pending in DB)
+            {skipped.size} order(s) skipped
           </p>
           <button
             onClick={() => setSkipped(new Set())}
@@ -157,7 +157,6 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Orders */}
       {loading ? (
         <div className="flex items-center justify-center h-48">
           <div className="w-10 h-10 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
@@ -166,9 +165,6 @@ export default function OrdersPage() {
         <div className="text-center py-16 bg-gray-900 border border-gray-800 rounded-xl">
           <Filter size={32} className="text-gray-600 mx-auto mb-3" />
           <p className="text-gray-400 font-medium">No {filter === 'all' ? '' : filter} orders</p>
-          <p className="text-gray-600 text-sm mt-1">
-            {filter === 'pending' ? 'All caught up! No pending reviews.' : `No ${filter} orders to display.`}
-          </p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -177,99 +173,170 @@ export default function OrdersPage() {
               key={order.id}
               className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 transition-colors"
             >
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
-                {/* Order Info */}
-                <div className="lg:col-span-2 p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h3 className="font-bold text-white text-lg">{order.products?.name || 'Unknown Product'}</h3>
-                      <p className="text-gray-500 text-xs font-mono mt-0.5">Order #{order.id.slice(0, 8)}</p>
-                    </div>
+              <div className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-white text-lg">{order.customer_name}</h3>
+                    <p className="text-gray-500 text-xs font-mono mt-0.5">Order #{order.tracking_number || order.id.slice(0, 8).toUpperCase()}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setPrintOrder(order);
+                        setTimeout(() => window.print(), 100);
+                      }}
+                      className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded-full text-xs font-bold text-gray-300 border border-gray-700 flex items-center gap-1 transition"
+                    >
+                      <Printer size={12} />
+                      Print Label
+                    </button>
                     <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                      order.status === 'approved' ? 'bg-green-900/30 text-green-400 border-green-800' :
-                      order.status === 'rejected' ? 'bg-red-900/30 text-red-400 border-red-800' :
-                      'bg-yellow-900/30 text-yellow-400 border-yellow-800'
-                    }`}>
-                      {order.status.toUpperCase()}
-                    </span>
+                    order.status === 'pending' ? 'bg-yellow-900/30 text-yellow-400 border-yellow-800' :
+                    order.status === 'approved' ? 'bg-green-900/30 text-green-400 border-green-800' :
+                    order.status === 'shipped' ? 'bg-blue-900/30 text-blue-400 border-blue-800' :
+                    order.status === 'delivered' ? 'bg-purple-900/30 text-purple-400 border-purple-800' :
+                    'bg-red-900/30 text-red-400 border-red-800'
+                  }`}>
+                    {order.status.toUpperCase()}
+                  </span>
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div className="bg-gray-800/60 rounded-lg p-3">
-                      <p className="text-xs text-gray-500 mb-1">Amount</p>
-                      <p className="font-bold text-white">Rs. {order.amount}</p>
-                    </div>
-                    <div className="bg-gray-800/60 rounded-lg p-3">
-                      <p className="text-xs text-gray-500 mb-1">Transaction ID</p>
-                      <p className="font-mono text-sm text-white truncate">{order.transaction_id}</p>
-                    </div>
-                    <div className="bg-gray-800/60 rounded-lg p-3">
-                      <p className="text-xs text-gray-500 mb-1">Submitted</p>
-                      <p className="text-sm text-white">{new Date(order.created_at).toLocaleDateString()}</p>
-                    </div>
-                    <div className="bg-gray-800/60 rounded-lg p-3">
-                      <p className="text-xs text-gray-500 mb-1">User</p>
-                      <p className="text-sm text-white truncate">{order.user_id.slice(0, 12)}...</p>
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div className="bg-gray-800/60 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 mb-1">Phone</p>
+                    <p className="font-medium text-white">{order.customer_phone}</p>
                   </div>
+                  <div className="bg-gray-800/60 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 mb-1">City</p>
+                    <p className="font-medium text-white">{order.city}</p>
+                  </div>
+                  <div className="bg-gray-800/60 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 mb-1">Total</p>
+                    <p className="font-bold text-white">Rs. {order.total_amount}</p>
+                  </div>
+                </div>
 
-                  {order.notes && (
-                    <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-3 mb-4">
-                      <p className="text-xs text-red-400 font-medium mb-1">Rejection Reason</p>
-                      <p className="text-sm text-red-300">{order.notes}</p>
-                    </div>
-                  )}
+                <div className="bg-gray-800/40 rounded-lg p-3 mb-4">
+                  <p className="text-xs text-gray-500 mb-1">Delivery Address</p>
+                  <p className="text-sm text-gray-300">{order.delivery_address}</p>
+                </div>
 
-                  {/* Action Buttons — only for pending */}
-                  {order.status === 'pending' && (
-                    <div className="flex gap-3 flex-wrap">
-                      <button
-                        disabled={processing === order.id}
-                        onClick={() => handleAction(order, 'approved')}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg font-bold text-sm transition-all hover:shadow-lg hover:shadow-green-500/20"
-                      >
-                        <CheckCircle size={15} />
-                        {processing === order.id ? 'Processing...' : 'Approve'}
-                      </button>
-                      <button
-                        disabled={processing === order.id}
-                        onClick={() => setRejectModal({ orderId: order.id, userEmail: order.user_email || '', productName: order.products?.name || '' })}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg font-bold text-sm transition-all hover:shadow-lg hover:shadow-red-500/20"
-                      >
-                        <XCircle size={15} />
-                        Reject
-                      </button>
-                      <button
-                        onClick={() => handleSkip(order.id)}
-                        className="flex items-center gap-2 px-5 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium text-sm text-gray-300 transition-all"
-                      >
-                        <SkipForward size={15} />
-                        Skip
-                      </button>
-                    </div>
+                {/* Order Items */}
+                <div className="bg-gray-800/40 rounded-lg p-3 mb-4">
+                  <p className="text-xs text-gray-500 mb-2">Order Items</p>
+                  {order.item_details && Array.isArray(order.item_details) && order.item_details.length > 0 ? (
+                    <ul className="text-sm space-y-1">
+                      {order.item_details.map((item: any, idx: number) => (
+                        <li key={idx} className="flex justify-between text-gray-300 border-b border-gray-700/50 pb-1 last:border-0 last:pb-0">
+                          <span>{item.quantity}x {item.name}</span>
+                          <span>Rs. {((item.price * (1 - (item.discountPercent || 0) / 100)) * item.quantity).toFixed(2)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-gray-400 italic">Item details not available (Legacy order)</p>
                   )}
                 </div>
 
-                {/* Receipt Preview */}
                 {order.screenshot_url && (
-                  <div className="border-t lg:border-t-0 lg:border-l border-gray-800 p-6 flex flex-col items-center justify-center bg-gray-900/50">
-                    <p className="text-xs text-gray-500 mb-3 uppercase font-medium tracking-wide">Payment Receipt</p>
-                    <div className="relative w-full max-w-[200px] aspect-[3/4] rounded-lg overflow-hidden border border-gray-700">
-                      <img
-                        src={order.screenshot_url}
-                        alt="Receipt"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <a
-                      href={order.screenshot_url}
-                      target="_blank"
+                  <div className="bg-gray-800/40 rounded-lg p-3 mb-4">
+                    <p className="text-xs text-gray-500 mb-2">Payment Proof</p>
+                    <a 
+                      href={order.screenshot_url} 
+                      target="_blank" 
                       rel="noreferrer"
-                      className="mt-3 flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition"
+                      className="block"
                     >
-                      <ExternalLink size={12} />
-                      View Full Size
+                      <img 
+                        src={order.screenshot_url} 
+                        alt="Payment Receipt" 
+                        className="max-w-full h-auto max-h-64 rounded-lg border border-gray-700 hover:border-blue-500 transition cursor-zoom-in"
+                      />
                     </a>
+                    <p className="text-xs text-gray-500 mt-2">Transaction ID: <span className="font-mono">{order.transaction_id || 'N/A'}</span></p>
+                  </div>
+                )}
+
+                {order.tracking_number && (
+                  <div className="bg-blue-900/20 border border-blue-800/50 rounded-lg p-3 mb-4">
+                    <p className="text-xs text-blue-400 font-medium mb-1">Tracking Number</p>
+                    <p className="font-mono text-sm text-white">{order.tracking_number}</p>
+                  </div>
+                )}
+
+                {order.notes && (
+                  <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-3 mb-4">
+                    <p className="text-xs text-red-400 font-medium mb-1">Admin Notes</p>
+                    <p className="text-sm text-red-300">{order.notes}</p>
+                  </div>
+                )}
+
+                {order.status === 'pending' && (
+                  <div className="flex gap-3 flex-wrap">
+                    <button
+                      disabled={processing === order.id}
+                      onClick={() => handleAction(order, 'approved')}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg font-bold text-sm transition"
+                    >
+                      <CheckCircle size={15} />
+                      Approve
+                    </button>
+                    <button
+                      disabled={processing === order.id}
+                      onClick={() => handleAction(order, 'cancelled')}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg font-bold text-sm transition"
+                    >
+                      <XCircle size={15} />
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleSkip(order.id)}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium text-sm text-gray-300 transition"
+                    >
+                      <SkipForward size={15} />
+                      Skip
+                    </button>
+                  </div>
+                )}
+
+                {order.status === 'approved' && (
+                  <div className="flex gap-3 flex-wrap">
+                    <button
+                      disabled={processing === order.id}
+                      onClick={() => setActionModal({ orderId: order.id, action: 'shipped' })}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg font-bold text-sm transition"
+                    >
+                      <Truck size={15} />
+                      Mark as Shipped
+                    </button>
+                    <button
+                      onClick={() => handleSkip(order.id)}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium text-sm text-gray-300 transition"
+                    >
+                      <SkipForward size={15} />
+                      Skip
+                    </button>
+                  </div>
+                )}
+
+                {order.status === 'shipped' && (
+                  <div className="flex gap-3 flex-wrap">
+                    <button
+                      disabled={processing === order.id}
+                      onClick={() => handleAction(order, 'delivered')}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg font-bold text-sm transition"
+                    >
+                      <Package size={15} />
+                      Mark as Delivered
+                    </button>
+                    <button
+                      onClick={() => handleSkip(order.id)}
+                      className="flex items-center gap-2 px-5 py-2.5 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium text-sm text-gray-300 transition"
+                    >
+                      <SkipForward size={15} />
+                      Skip
+                    </button>
                   </div>
                 )}
               </div>
@@ -278,38 +345,93 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Reject Modal */}
-      {rejectModal && (
+      {actionModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-xl font-bold text-white mb-2">Reject Order</h3>
-            <p className="text-gray-400 text-sm mb-4">
-              Provide a reason — it will be sent to the customer via email.
-            </p>
-            <p className="text-sm text-gray-300 mb-4">
-              Product: <span className="font-semibold text-white">{rejectModal.productName}</span>
-            </p>
-            <textarea
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="e.g. Transaction ID not found, screenshot unclear, amount mismatch..."
-              rows={4}
-              className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-red-500 transition resize-none mb-4"
-            />
+            <h3 className="text-xl font-bold text-white mb-4">
+              {actionModal.action === 'shipped' ? 'Mark as Shipped' : 'Mark as Delivered'}
+            </h3>
+            {actionModal.action === 'shipped' && (
+              <div className="mb-4">
+                <label className="block text-sm text-gray-400 mb-1">Tracking Number (Optional)</label>
+                <input
+                  type="text"
+                  value={trackingNumber}
+                  onChange={(e) => setTrackingNumber(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
+                  placeholder="Enter tracking number"
+                />
+              </div>
+            )}
             <div className="flex gap-3">
               <button
-                onClick={handleRejectSubmit}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl transition"
+                onClick={() => {
+                  handleAction(
+                    orders.find(o => o.id === actionModal.orderId)!,
+                    actionModal.action,
+                    actionModal.action === 'shipped' ? 'Order shipped' : 'Order delivered'
+                  );
+                }}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition"
               >
-                Confirm Rejection
+                Confirm
               </button>
               <button
-                onClick={() => { setRejectModal(null); setRejectReason(''); }}
+                onClick={() => { setActionModal(null); setTrackingNumber(''); }}
                 className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium py-3 rounded-xl transition"
               >
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Printable Delivery Label */}
+      {printOrder && (
+        <div className="hidden print:block fixed inset-0 bg-white text-black z-[100] p-8">
+          <div className="max-w-2xl mx-auto border-4 border-black p-8">
+            <div className="flex justify-between items-start border-b-2 border-black pb-6 mb-6">
+              <div>
+                <h1 className="text-4xl font-extrabold uppercase tracking-tighter">CamRigged</h1>
+                <p className="text-sm mt-1 font-bold">Premium Notes & Student Essentials</p>
+                <p className="text-sm">Returns: info@camrigged.com</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-gray-500 font-bold tracking-widest uppercase mb-1">Shipping Date</p>
+                <p className="text-xl font-bold">{new Date().toLocaleDateString()}</p>
+              </div>
+            </div>
+
+            <div className="mb-8">
+              <p className="text-sm font-bold text-gray-600 tracking-widest uppercase mb-2">Ship To</p>
+              <h2 className="text-3xl font-bold mb-2">{printOrder.customer_name}</h2>
+              <p className="text-xl leading-relaxed max-w-md">{printOrder.delivery_address}</p>
+              <p className="text-xl font-bold mt-1">{printOrder.city}{printOrder.postal_code ? `, ${printOrder.postal_code}` : ''}</p>
+              <p className="text-xl mt-4"><span className="font-bold">Phone:</span> {printOrder.customer_phone}</p>
+            </div>
+
+            <div className="border-t-2 border-black pt-6 mb-8 flex justify-between">
+              <div>
+                <p className="text-sm font-bold text-gray-600 tracking-widest uppercase mb-1">Order Details</p>
+                <p className="text-lg"><span className="font-bold">Order ID:</span> {printOrder.tracking_number || printOrder.id.slice(0, 8).toUpperCase()}</p>
+                <p className="text-lg"><span className="font-bold">Amount:</span> Rs. {printOrder.total_amount}</p>
+                <p className="text-lg"><span className="font-bold">Payment:</span> {printOrder.payment_method?.replace('_', ' ').toUpperCase() || 'COD'}</p>
+              </div>
+            </div>
+
+            {printOrder.item_details && Array.isArray(printOrder.item_details) && (
+              <div className="border-t-2 border-black pt-6">
+                <p className="text-sm font-bold text-gray-600 tracking-widest uppercase mb-3">Packing Slip</p>
+                <ul className="text-sm">
+                  {printOrder.item_details.map((item: any, idx: number) => (
+                    <li key={idx} className="flex justify-between py-1 border-b border-gray-200 last:border-0">
+                      <span><span className="font-bold mr-2">{item.quantity}x</span> {item.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       )}

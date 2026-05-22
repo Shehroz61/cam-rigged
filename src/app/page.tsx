@@ -3,84 +3,61 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Product, useCartStore } from '@/store/cartStore';
-import { useAuth } from '@/context/AuthContext';
 import Link from 'next/link';
-import { LayoutDashboard, ShoppingCart, LogOut, Zap } from 'lucide-react';
+import { ShoppingCart, Package, TrendingUp } from 'lucide-react';
 
 export default function Home() {
-  const { user } = useAuth();
-  const [products, setProducts] = useState<Product[]>([]);
   const { items, addToCart } = useCartStore();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [bundles, setBundles] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterCategory, setFilterCategory] = useState<'All' | 'O Level' | 'A Level'>('All');
-  const [filterType, setFilterType] = useState<'All' | 'Single' | 'Bundle'>('All');
-
-  const ADMIN_EMAIL = 'shehrozhameed61@gmail.com';
-  const isAdmin = user?.email === ADMIN_EMAIL || user?.email?.startsWith('shehrozhameed61+');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    async function fetchProducts() {
-      const { data, error } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-      if (data && !error) {
-        setProducts(data as Product[]);
-      }
+    async function fetchData() {
+      const productsRes = await supabase.from('products').select('*, categories(name)').eq('is_active', true).order('created_at', { ascending: false });
+      const bundlesRes = await supabase.from('bundles').select('*, bundle_products(product_id, products(name, price_pkr, description, categories(name)))').order('created_at', { ascending: false });
+      const categoriesRes = await supabase.from('categories').select('*').eq('active', true).order('name');
+      
+      if (productsRes.data) setProducts(productsRes.data);
+      if (bundlesRes.data) setBundles(bundlesRes.data);
+      if (categoriesRes.data) setCategories(categoriesRes.data);
       setLoading(false);
     }
-    fetchProducts();
+    fetchData();
   }, []);
 
-  const filtered = products.filter((p) => {
-    const catOk = filterCategory === 'All' || p.category === filterCategory;
-    const typeOk = filterType === 'All' || p.type === filterType;
-    return catOk && typeOk;
+  const filteredProducts = products.filter((p) => {
+    const catOk = selectedCategory === 'all' || p.category_id === selectedCategory;
+    const searchOk = p.name.toLowerCase().includes(searchQuery.toLowerCase());
+    return catOk && searchOk;
   });
 
+  const filteredBundles = bundles.filter((b) =>
+    b.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <div className="min-h-screen bg-gray-900 text-white font-sans">
+    <div className="min-h-screen bg-gray-950 text-white font-sans">
       {/* Navigation */}
       <nav className="sticky top-0 z-50 bg-gray-900/80 backdrop-blur-md border-b border-gray-800 p-4">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <Link href="/" className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">
             CamRigged
           </Link>
-          <div className="flex items-center gap-3">
-            {user ? (
-              <>
-                <Link
-                  href="/dashboard"
-                  className="flex items-center gap-2 text-sm text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-2 rounded-lg transition"
-                >
-                  <LayoutDashboard size={14} />
-                  Dashboard
-                </Link>
-                {isAdmin && (
-                  <Link
-                    href="/powerhouse"
-                    className="flex items-center gap-2 text-sm text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/30 border border-red-900/40 px-3 py-2 rounded-lg transition"
-                  >
-                    <Zap size={14} />
-                    Powerhouse
-                  </Link>
-                )}
-                <button
-                  onClick={() => supabase.auth.signOut()}
-                  className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-red-400 transition"
-                >
-                  <LogOut size={14} />
-                </button>
-              </>
-            ) : (
-              <Link href="/login" className="text-sm text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 px-3 py-2 rounded-lg transition">
-                Login / Sign Up
-              </Link>
-            )}
+          <div className="flex items-center gap-4">
+            <Link href="/track" className="text-sm text-gray-300 hover:text-white transition">
+              Track Order
+            </Link>
             <Link href="/checkout" className="relative group">
               <div className="px-4 py-2 bg-blue-600 group-hover:bg-blue-700 transition rounded-full font-bold shadow-lg shadow-blue-500/30 flex items-center gap-2 text-sm">
                 <ShoppingCart size={14} />
                 <span>Cart</span>
                 {items.length > 0 && (
                   <span className="bg-white text-blue-600 px-1.5 py-0.5 rounded-full text-xs font-extrabold">
-                    {items.length}
+                    {items.reduce((sum, item) => sum + item.quantity, 0)}
                   </span>
                 )}
               </div>
@@ -93,120 +70,201 @@ export default function Home() {
       <header className="relative overflow-hidden py-24 sm:py-32 flex flex-col items-center justify-center text-center px-4">
         <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/40 via-gray-900 to-gray-900" />
         <h1 className="text-5xl sm:text-7xl font-extrabold tracking-tight mb-6">
-          Ace Your Exams with <br className="hidden sm:block" />
+          Premium Notes & <br className="hidden sm:block" />
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 animate-pulse">
-            Premium Notes
+            Student Essentials
           </span>
         </h1>
         <p className="max-w-2xl text-lg sm:text-xl text-gray-400 mb-10">
-          The ultimate O Level and A Level study materials, bundled for success. Start your journey to straight A*s today.
+          Get physical copies of study notes delivered to your doorstep. Plus snacks, stationery, and more!
         </p>
         <div className="flex gap-4">
           <a
             href="#products"
-            className="px-8 py-3 bg-white text-gray-900 font-bold rounded-full hover:bg-gray-200 transition shadow-[0_0_20px_rgba(255,255,255,0.3)]"
+            className="px-8 py-3 bg-blue-600 text-white font-bold rounded-full hover:bg-blue-700 transition shadow-[0_0_20px_rgba(59,130,246,0.5)]"
           >
-            Explore Collection
+            Shop Now
           </a>
-          {!user && (
-            <Link
-              href="/signup"
-              className="px-8 py-3 border border-gray-600 text-gray-300 font-bold rounded-full hover:border-gray-400 hover:text-white transition"
-            >
-              Sign Up Free
-            </Link>
-          )}
+          <a
+            href="#bundles"
+            className="px-8 py-3 border border-purple-600 text-purple-300 font-bold rounded-full hover:bg-purple-600/20 transition"
+          >
+            View Bundles
+          </a>
         </div>
       </header>
 
-      {/* Product Grid */}
-      <main id="products" className="max-w-7xl mx-auto px-4 py-16">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-10">
-          <h2 className="text-3xl font-bold">Our Resources</h2>
-          {/* Filters */}
+      {/* Search and Filter */}
+      <section className="max-w-7xl mx-auto px-4 py-8">
+        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
           <div className="flex gap-2 flex-wrap">
-            {(['All', 'O Level', 'A Level'] as const).map((c) => (
+            <button
+              onClick={() => setSelectedCategory('all')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
+                selectedCategory === 'all'
+                  ? 'bg-blue-600 border-blue-600 text-white'
+                  : 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-white'
+              }`}
+            >
+              All
+            </button>
+            {categories.map((cat) => (
               <button
-                key={c}
-                onClick={() => setFilterCategory(c)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
-                  filterCategory === c
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
+                  selectedCategory === cat.id
                     ? 'bg-blue-600 border-blue-600 text-white'
                     : 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-white'
                 }`}
               >
-                {c}
-              </button>
-            ))}
-            <div className="w-px bg-gray-700 mx-1" />
-            {(['All', 'Single', 'Bundle'] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setFilterType(t)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
-                  filterType === t
-                    ? 'bg-purple-600 border-purple-600 text-white'
-                    : 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-white'
-                }`}
-              >
-                {t}
+                {cat.name}
               </button>
             ))}
           </div>
+          <input
+            type="text"
+            placeholder="Search products..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+          />
         </div>
+      </section>
+
+      {/* Bundles Section */}
+      {filteredBundles.length > 0 && (
+        <section id="bundles" className="max-w-7xl mx-auto px-4 py-8">
+          <h2 className="text-3xl font-bold mb-6 flex items-center gap-2">
+            <TrendingUp className="text-purple-400" />
+            Special Bundles
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredBundles.map((bundle) => (
+              <div
+                key={bundle.id}
+                className="bg-gradient-to-br from-purple-900/50 to-blue-900/50 backdrop-blur-sm border border-purple-700/50 rounded-2xl p-6 hover:border-purple-500/50 hover:shadow-[0_0_30px_rgba(147,51,234,0.2)] transition-all duration-300"
+              >
+                <div className="flex justify-between items-start mb-4">
+                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-purple-900/80 text-purple-300 border border-purple-700">
+                    Bundle - Save {bundle.discount_percent}%
+                  </span>
+                </div>
+                <h3 className="text-2xl font-bold mb-2 text-purple-300">{bundle.name}</h3>
+                <p className="text-gray-400 text-sm mb-4">{bundle.description}</p>
+                {/* Calculate bundle original and discounted price */}
+                {(() => {
+                  const originalPrice = bundle.bundle_products?.reduce((sum: number, bp: any) => sum + (bp.products?.price_pkr || 0), 0) || 0;
+                  const finalPrice = originalPrice * (1 - (bundle.discount_percent || 0) / 100);
+                  return (
+                    <div className="mb-4">
+                      {bundle.discount_percent > 0 && (
+                        <p className="text-sm text-gray-500 line-through">Rs. {originalPrice.toFixed(2)}</p>
+                      )}
+                      <p className="text-2xl font-bold text-white mb-2">
+                        Rs. {finalPrice.toFixed(2)}
+                      </p>
+                    </div>
+                  );
+                })()}
+                <div className="mb-4">
+                  <p className="text-sm text-gray-400 mb-1">Includes:</p>
+                  <ul className="text-sm text-gray-300 space-y-1">
+                    {bundle.bundle_products?.slice(0, 3).map((bp: any, idx: number) => (
+                      <li key={idx}>• {bp.products?.name || 'Item'}</li>
+                    ))}
+                    {bundle.bundle_products?.length > 3 && (
+                      <li className="text-gray-500">+ {bundle.bundle_products.length - 3} more items</li>
+                    )}
+                  </ul>
+                </div>
+                <button
+                  onClick={() => {
+                    const bundleData = {
+                      id: bundle.id,
+                      name: bundle.name,
+                      description: bundle.description,
+                      discount_percent: bundle.discount_percent,
+                      products: bundle.bundle_products?.map((bp: any) => bp.products) || [],
+                    };
+                    useCartStore.getState().addBundleToCart(bundleData);
+                  }}
+                  className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold transition"
+                >
+                  Add Bundle to Cart
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Product Grid */}
+      <main id="products" className="max-w-7xl mx-auto px-4 py-16">
+        <h2 className="text-3xl font-bold mb-6 flex items-center gap-2">
+          <Package className="text-blue-400" />
+          Products
+        </h2>
 
         {loading ? (
           <div className="flex justify-center items-center h-48">
             <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
           </div>
-        ) : filtered.length === 0 ? (
+        ) : filteredProducts.length === 0 ? (
           <div className="text-center text-gray-500 py-12">
             <p className="text-xl">No products found.</p>
-            <p className="mt-2 text-sm">
-              {products.length === 0 ? 'Admins: Head to the Powerhouse to add inventory!' : 'Try adjusting your filters.'}
-            </p>
+            <p className="mt-2 text-sm">Try adjusting your filters.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {filtered.map((product) => {
+            {filteredProducts.map((product) => {
               const inCart = items.some((item) => item.id === product.id);
+              const finalPrice = product.price_pkr * (1 - (product.discount_percent || 0) / 100);
               return (
                 <div
                   key={product.id}
                   className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl p-6 hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)] transition-all duration-300 group flex flex-col"
                 >
+                  {product.image_url && (
+                    <img
+                      src={product.image_url}
+                      alt={product.name}
+                      className="w-full h-48 object-cover rounded-xl mb-4"
+                    />
+                  )}
                   <div className="flex justify-between items-start mb-4">
-                    <span
-                      className={`text-xs font-bold px-3 py-1 rounded-full ${
-                        product.category === 'A Level'
-                          ? 'bg-purple-900/50 text-purple-300 border border-purple-700'
-                          : 'bg-blue-900/50 text-blue-300 border border-blue-700'
-                      }`}
-                    >
-                      {product.category}
+                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                      (product as any).categories?.name 
+                        ? 'bg-blue-900/50 text-blue-300 border border-blue-700' 
+                        : 'bg-gray-700 text-gray-400 border border-gray-600'
+                    }`}>
+                      {(product as any).categories?.name || 'Uncategorized'}
                     </span>
-                    <span
-                      className={`text-xs font-bold px-3 py-1 rounded-full ${
-                        product.type === 'Bundle'
-                          ? 'bg-amber-900/50 text-amber-300 border border-amber-700'
-                          : 'bg-gray-700 text-gray-300'
-                      }`}
-                    >
-                      {product.type}
-                    </span>
+                    {product.discount_percent > 0 && (
+                      <span className="text-xs font-bold px-3 py-1 rounded-full bg-red-900/50 text-red-300 border border-red-700">
+                        -{product.discount_percent}%
+                      </span>
+                    )}
                   </div>
 
-                  <h3 className="text-2xl font-bold mb-2 group-hover:text-blue-400 transition-colors">
+                  <h3 className="text-xl font-bold mb-2 group-hover:text-blue-400 transition-colors">
                     {product.name}
                   </h3>
                   <p className="text-gray-400 text-sm mb-6 flex-grow">
-                    {product.description || 'Premium study resource tailored for top grades.'}
+                    {product.description || 'High-quality product for students.'}
                   </p>
 
                   <div className="flex items-center justify-between mb-6">
                     <div>
-                      <p className="text-2xl font-bold text-white">Rs. {product.price_pkr}</p>
-                      <p className="text-sm text-gray-500">${product.price_usdt} USDT</p>
+                      {product.discount_percent > 0 && (
+                        <p className="text-sm text-gray-500 line-through">Rs. {product.price_pkr}</p>
+                      )}
+                      <p className="text-2xl font-bold text-white">
+                        Rs. {product.discount_percent > 0 ? finalPrice.toFixed(2) : product.price_pkr}
+                      </p>
+                      {product.stock_quantity && product.stock_quantity < 10 && (
+                        <p className="text-xs text-red-400 mt-1">Only {product.stock_quantity} left!</p>
+                      )}
                     </div>
                   </div>
 
@@ -219,7 +277,7 @@ export default function Home() {
                         : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-blue-500/25'
                     }`}
                   >
-                    {inCart ? '✓ Added to Cart' : `Add to ${product.type === 'Bundle' ? 'Bundle' : 'Cart'}`}
+                    {inCart ? '✓ In Cart' : 'Add to Cart'}
                   </button>
                 </div>
               );
@@ -233,9 +291,9 @@ export default function Home() {
         <p className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 mb-3">
           CamRigged
         </p>
-        <p className="text-sm mb-4">Premium O & A Level Study Resources</p>
+        <p className="text-sm mb-4">Premium Notes & Student Essentials Delivery</p>
         <div className="flex justify-center gap-6 text-sm mb-6">
-          <Link href="/dashboard" className="hover:text-gray-300 transition">My Dashboard</Link>
+          <Link href="/track" className="hover:text-gray-300 transition">Track Order</Link>
           <Link href="/checkout" className="hover:text-gray-300 transition">Checkout</Link>
           <a href="mailto:support@camrigged.com" className="hover:text-gray-300 transition">Support</a>
         </div>

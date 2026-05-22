@@ -2,97 +2,86 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Upload, Trash2, FileText, Video, Plus, Package, Edit2 } from 'lucide-react';
+import { Upload, Trash2, Plus, Package, Edit2 } from 'lucide-react';
 
 interface Product {
   id: string;
   name: string;
-  category: string;
+  category_id: string;
+  category_name?: string;
   description: string;
   price_pkr: number;
-  price_usdt: number;
-  type: string;
-  encrypted_content_url: string | null;
+  discount_percent: number;
+  stock_quantity: number;
+  image_url: string | null;
+  is_active: boolean;
   created_at: string;
+}
+
+interface Category {
+  id: string;
+  name: string;
 }
 
 export default function InventoryPage() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const [newProduct, setNewProduct] = useState({
     name: '',
-    category: 'O Level',
+    category_id: '',
     description: '',
     price_pkr: '',
-    price_usdt: '',
-    type: 'Single',
+    discount_percent: '0',
+    stock_quantity: '100',
+    image_url: '',
+    is_active: true,
   });
   const [file, setFile] = useState<File | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
 
   const fetchProducts = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('products')
-      .select('*')
+      .select('*, categories(name)')
       .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching products:', error);
+    }
     setProducts(data || []);
     setLoading(false);
   }, []);
 
+  const fetchCategories = async () => {
+    const { data } = await supabase.from('categories').select('*').eq('active', true);
+    setCategories(data || []);
+  };
+
   useEffect(() => {
-    fetchProducts();
+    Promise.all([fetchProducts(), fetchCategories()]);
   }, [fetchProducts]);
 
   const handleDelete = async (product: Product) => {
     if (!confirm(`Delete "${product.name}"? This cannot be undone.`)) return;
     setDeletingId(product.id);
-    console.log("Attempting to delete product:", product.id);
 
     try {
-      // 1. Delete file from storage if it exists
-      if (product.encrypted_content_url) {
-        try {
-          const url = new URL(product.encrypted_content_url);
-          // More robust way to get the filename regardless of public/private path
-          const pathSegments = url.pathname.split('/');
-          const fileName = pathSegments[pathSegments.length - 1];
-          
-          console.log("Attempting to delete file from storage:", fileName);
-          const { error: storageError } = await supabase.storage
-            .from('content')
-            .remove([fileName]);
-          
-          if (storageError) {
-            console.error("Storage deletion error:", storageError);
-            // We continue anyway to try and delete the DB record
-          } else {
-            console.log("File deleted from storage successfully");
-          }
-        } catch (urlErr) {
-          console.error("Error parsing URL for deletion:", urlErr);
-        }
-      }
-
-      // 2. Delete from Database
       const { error: dbError } = await supabase
         .from('products')
         .delete()
         .eq('id', product.id);
 
-      if (dbError) {
-        throw dbError;
-      }
+      if (dbError) throw dbError;
 
-      console.log("Product deleted from database successfully");
       await fetchProducts();
     } catch (err: any) {
-      console.error("Full deletion error:", err);
-      alert(`Failed to delete: ${err.message || "Check console for details"}`);
+      alert(`Failed to delete: ${err.message}`);
     } finally {
       setDeletingId(null);
     }
@@ -102,11 +91,13 @@ export default function InventoryPage() {
     setEditingId(product.id);
     setNewProduct({
       name: product.name,
-      category: product.category,
+      category_id: product.category_id || '',
       description: product.description || '',
       price_pkr: product.price_pkr.toString(),
-      price_usdt: product.price_usdt.toString(),
-      type: product.type,
+      discount_percent: product.discount_percent?.toString() || '0',
+      stock_quantity: product.stock_quantity?.toString() || '100',
+      image_url: product.image_url || '',
+      is_active: product.is_active,
     });
     setFile(null);
     setShowForm(true);
@@ -115,7 +106,16 @@ export default function InventoryPage() {
 
   const handleCancel = () => {
     setEditingId(null);
-    setNewProduct({ name: '', category: 'O Level', description: '', price_pkr: '', price_usdt: '', type: 'Single' });
+    setNewProduct({
+      name: '',
+      category_id: '',
+      description: '',
+      price_pkr: '',
+      discount_percent: '0',
+      stock_quantity: '100',
+      image_url: '',
+      is_active: true,
+    });
     setFile(null);
     setShowForm(false);
   };
@@ -123,39 +123,34 @@ export default function InventoryPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // File is required only for NEW products
-    if (!newProduct.name || !newProduct.price_pkr || !newProduct.price_usdt) {
+    if (!newProduct.name || !newProduct.price_pkr || !newProduct.category_id) {
       alert('Please fill all required fields.');
       return;
     }
     
-    if (!editingId && !file) {
-      alert('Please attach a file for new content.');
-      return;
-    }
-
     setIsUploading(true);
     try {
-      let finalUrl = editingId ? products.find(p => p.id === editingId)?.encrypted_content_url || null : null;
+      let finalImageUrl = newProduct.image_url;
 
       if (file) {
         const fileExt = file.name.split('.').pop();
         const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-        const { error: uploadError } = await supabase.storage.from('content').upload(fileName, file);
+        const { error: uploadError } = await supabase.storage.from('products').upload(fileName, file);
         if (uploadError) throw new Error(`Upload Failed: ${uploadError.message}`);
 
-        const { data: urlData } = supabase.storage.from('content').getPublicUrl(fileName);
-        finalUrl = urlData.publicUrl;
+        const { data: urlData } = supabase.storage.from('products').getPublicUrl(fileName);
+        finalImageUrl = urlData.publicUrl;
       }
 
       const productData = {
         name: newProduct.name,
-        category: newProduct.category,
+        category_id: newProduct.category_id || null,
         description: newProduct.description,
         price_pkr: Number(newProduct.price_pkr),
-        price_usdt: Number(newProduct.price_usdt),
-        type: newProduct.type,
-        encrypted_content_url: finalUrl,
+        discount_percent: Number(newProduct.discount_percent),
+        stock_quantity: Number(newProduct.stock_quantity),
+        image_url: finalImageUrl || null,
+        is_active: newProduct.is_active,
       };
 
       if (editingId) {
@@ -178,19 +173,12 @@ export default function InventoryPage() {
     }
   };
 
-  const getFileIcon = (url: string | null) => {
-    if (!url) return <FileText size={14} className="text-gray-500" />;
-    if (url.match(/\.(mp4|mov|avi|webm)$/i)) return <Video size={14} className="text-blue-400" />;
-    return <FileText size={14} className="text-red-400" />;
-  };
-
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold text-white">Inventory</h1>
-          <p className="text-gray-400 mt-1">Manage your study resource catalog.</p>
+          <h1 className="text-3xl font-extrabold text-white">Product Inventory</h1>
+          <p className="text-gray-400 mt-1">Manage your products and stock.</p>
         </div>
         <button
           onClick={() => {
@@ -207,14 +195,13 @@ export default function InventoryPage() {
         </button>
       </div>
 
-      {/* Upload Form */}
       {showForm && (
         <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 ring-1 ring-blue-500/30">
           <div className="flex items-center gap-3 mb-5">
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
               {editingId ? <Edit2 size={15} className="text-white" /> : <Upload size={15} className="text-white" />}
             </div>
-            <h2 className="text-lg font-bold text-white">{editingId ? 'Edit Product' : 'Upload New Content'}</h2>
+            <h2 className="text-lg font-bold text-white">{editingId ? 'Edit Product' : 'Add New Product'}</h2>
           </div>
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -225,18 +212,21 @@ export default function InventoryPage() {
                 value={newProduct.name}
                 onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-                placeholder="e.g. O Level Physics Paper 1 Notes"
+                placeholder="e.g. Physics Notes Chapter 1"
               />
             </div>
             <div>
               <label className="block text-sm text-gray-400 mb-1.5">Category *</label>
               <select
-                value={newProduct.category}
-                onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
+                value={newProduct.category_id}
+                onChange={(e) => setNewProduct({ ...newProduct, category_id: e.target.value })}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                required
               >
-                <option>O Level</option>
-                <option>A Level</option>
+                <option value="">Select Category</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
               </select>
             </div>
             <div className="md:col-span-2">
@@ -246,7 +236,7 @@ export default function InventoryPage() {
                 onChange={(e) => setNewProduct({ ...newProduct, description: e.target.value })}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition resize-none"
                 rows={2}
-                placeholder="Brief description of the content..."
+                placeholder="Product description..."
               />
             </div>
             <div>
@@ -257,46 +247,60 @@ export default function InventoryPage() {
                 value={newProduct.price_pkr}
                 onChange={(e) => setNewProduct({ ...newProduct, price_pkr: e.target.value })}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-                placeholder="e.g. 1500"
+                placeholder="e.g. 500"
               />
             </div>
             <div>
-              <label className="block text-sm text-gray-400 mb-1.5">Price (USDT) *</label>
+              <label className="block text-sm text-gray-400 mb-1.5">Discount (%)</label>
               <input
                 type="number"
-                required
-                step="0.01"
-                value={newProduct.price_usdt}
-                onChange={(e) => setNewProduct({ ...newProduct, price_usdt: e.target.value })}
+                min="0"
+                max="100"
+                value={newProduct.discount_percent}
+                onChange={(e) => setNewProduct({ ...newProduct, discount_percent: e.target.value })}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-                placeholder="e.g. 5.00"
+                placeholder="e.g. 10"
               />
             </div>
             <div>
-              <label className="block text-sm text-gray-400 mb-1.5">Type *</label>
-              <select
-                value={newProduct.type}
-                onChange={(e) => setNewProduct({ ...newProduct, type: e.target.value })}
+              <label className="block text-sm text-gray-400 mb-1.5">Stock Quantity</label>
+              <input
+                type="number"
+                value={newProduct.stock_quantity}
+                onChange={(e) => setNewProduct({ ...newProduct, stock_quantity: e.target.value })}
                 className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                <option>Single</option>
-                <option>Bundle</option>
-              </select>
+                placeholder="e.g. 100"
+              />
             </div>
             <div>
-              <label className="block text-sm text-gray-400 mb-1.5">
-                Content File {editingId ? '(Optional)' : '(PDF/Video) *'}
-              </label>
+              <label className="block text-sm text-gray-400 mb-1.5">Image URL (Optional)</label>
+              <input
+                type="text"
+                value={newProduct.image_url}
+                onChange={(e) => setNewProduct({ ...newProduct, image_url: e.target.value })}
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                placeholder="https://..."
+              />
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-1.5">Upload Image</label>
               <input
                 type="file"
-                required={!editingId}
-                accept=".pdf,.mp4,.mov,.avi,.webm"
+                accept="image/*"
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700 transition"
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm text-white file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-bold file:bg-blue-600 file:text-white hover:file:bg-blue-700 transition"
               />
-              {editingId && (
-                <p className="text-xs text-gray-500 mt-1">Leave empty to keep current file.</p>
-              )}
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-1.5">Status</label>
+              <select
+                value={newProduct.is_active ? 'active' : 'inactive'}
+                onChange={(e) => setNewProduct({ ...newProduct, is_active: e.target.value === 'active' })}
+                className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
             </div>
             <div className="md:col-span-2 flex gap-3">
               <button
@@ -304,7 +308,7 @@ export default function InventoryPage() {
                 disabled={isUploading}
                 className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 px-6 py-3 rounded-xl font-bold text-white transition-all shadow-lg shadow-green-500/20"
               >
-                {isUploading ? 'Saving...' : editingId ? 'Update Product' : 'Add Product to Store'}
+                {isUploading ? 'Saving...' : editingId ? 'Update Product' : 'Add Product'}
               </button>
               <button
                 type="button"
@@ -318,7 +322,6 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Products Table */}
       {loading ? (
         <div className="flex items-center justify-center h-48">
           <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -327,7 +330,7 @@ export default function InventoryPage() {
         <div className="text-center py-16 bg-gray-900 border border-gray-800 rounded-xl">
           <Package size={32} className="text-gray-600 mx-auto mb-3" />
           <p className="text-gray-400 font-medium">No products yet</p>
-          <p className="text-gray-600 text-sm mt-1">Click &quot;Add Product&quot; to upload your first resource.</p>
+          <p className="text-gray-600 text-sm mt-1">Click "Add Product" to create your first product.</p>
         </div>
       ) : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -340,11 +343,10 @@ export default function InventoryPage() {
                 <tr className="text-gray-500 text-xs uppercase border-b border-gray-800">
                   <th className="px-6 py-3 text-left">Name</th>
                   <th className="px-6 py-3 text-left">Category</th>
-                  <th className="px-6 py-3 text-left">Type</th>
-                  <th className="px-6 py-3 text-left">PKR</th>
-                  <th className="px-6 py-3 text-left">USDT</th>
-                  <th className="px-6 py-3 text-left">File</th>
-                  <th className="px-6 py-3 text-left">Added</th>
+                  <th className="px-6 py-3 text-left">Price</th>
+                  <th className="px-6 py-3 text-left">Discount</th>
+                  <th className="px-6 py-3 text-left">Stock</th>
+                  <th className="px-6 py-3 text-left">Status</th>
                   <th className="px-6 py-3 text-left">Action</th>
                 </tr>
               </thead>
@@ -354,41 +356,30 @@ export default function InventoryPage() {
                     <td className="px-6 py-4 font-medium text-white">{product.name}</td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                        product.category === 'A Level'
-                          ? 'bg-purple-900/50 text-purple-300 border border-purple-800'
-                          : 'bg-blue-900/50 text-blue-300 border border-blue-800'
+                        (product as any).categories?.name 
+                          ? 'bg-blue-900/50 text-blue-300 border border-blue-800' 
+                          : 'bg-gray-700 text-gray-400 border border-gray-600'
                       }`}>
-                        {product.category}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                        product.type === 'Bundle'
-                          ? 'bg-amber-900/50 text-amber-300 border border-amber-800'
-                          : 'bg-gray-700 text-gray-300 border border-gray-600'
-                      }`}>
-                        {product.type}
+                        {(product as any).categories?.name || 'Uncategorized'}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-gray-300 font-medium">Rs. {product.price_pkr}</td>
-                    <td className="px-6 py-4 text-gray-300">${product.price_usdt}</td>
                     <td className="px-6 py-4">
-                      {product.encrypted_content_url ? (
-                        <a
-                          href={product.encrypted_content_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1.5 text-blue-400 hover:text-blue-300 transition"
-                        >
-                          {getFileIcon(product.encrypted_content_url)}
-                          <span className="text-xs">View</span>
-                        </a>
+                      {product.discount_percent > 0 ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-red-900/50 text-red-300 border border-red-800">
+                          -{product.discount_percent}%
+                        </span>
                       ) : (
-                        <span className="text-gray-600 text-xs">No file</span>
+                        <span className="text-gray-600">—</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 text-gray-500 text-xs">
-                      {new Date(product.created_at).toLocaleDateString()}
+                    <td className="px-6 py-4 text-gray-300">{product.stock_quantity}</td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                        product.is_active ? 'bg-green-900/50 text-green-400 border border-green-800' : 'bg-gray-700 text-gray-400'
+                      }`}>
+                        {product.is_active ? 'Active' : 'Inactive'}
+                      </span>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
