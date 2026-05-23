@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { CheckCircle, XCircle, SkipForward, RefreshCw, Filter, Truck, Package, Printer } from 'lucide-react';
+import { CheckCircle, XCircle, SkipForward, RefreshCw, Filter, Truck, Package, Printer, Trash2, AlertTriangle } from 'lucide-react';
 
 type OrderStatus = 'pending' | 'approved' | 'shipped' | 'delivered' | 'cancelled' | 'all';
 
@@ -37,6 +37,9 @@ export default function OrdersPage() {
   const [processing, setProcessing] = useState<string | null>(null);
   const [actionModal, setActionModal] = useState<{ orderId: string; action: 'shipped' | 'delivered' | 'cancelled' } | null>(null);
   const [trackingNumber, setTrackingNumber] = useState('');
+  const [deleteModal, setDeleteModal] = useState<string | null>(null);
+  const [resetModal, setResetModal] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -98,6 +101,66 @@ export default function OrdersPage() {
     setSkipped((prev) => new Set([...prev, orderId]));
   };
 
+  const extractReceiptPath = (url: string | null): string | null => {
+    if (!url) return null;
+    try {
+      const marker = '/object/public/receipts/';
+      const idx = url.indexOf(marker);
+      if (idx !== -1) return url.substring(idx + marker.length);
+    } catch {}
+    return null;
+  };
+
+  const handleDeleteOrder = async (order: Order) => {
+    setProcessing(order.id);
+    try {
+      // 1. Delete receipt from storage if exists
+      const receiptPath = extractReceiptPath(order.screenshot_url);
+      if (receiptPath) {
+        await supabase.storage.from('receipts').remove([receiptPath]);
+      }
+      // 2. Delete tracking entries
+      await supabase.from('order_tracking').delete().eq('order_id', order.id);
+      // 3. Delete the order
+      await supabase.from('orders').delete().eq('id', order.id);
+      await fetchOrders();
+    } catch (err) {
+      console.error('Failed to delete order:', err);
+      alert('Failed to delete order.');
+    } finally {
+      setProcessing(null);
+      setDeleteModal(null);
+    }
+  };
+
+  const handleResetAll = async () => {
+    setResetting(true);
+    try {
+      // 1. Get all orders to find receipt URLs
+      const { data: allOrders } = await supabase.from('orders').select('id, screenshot_url');
+      if (allOrders && allOrders.length > 0) {
+        // 2. Delete all receipts from storage
+        const receiptPaths = allOrders
+          .map((o) => extractReceiptPath(o.screenshot_url))
+          .filter(Boolean) as string[];
+        if (receiptPaths.length > 0) {
+          await supabase.storage.from('receipts').remove(receiptPaths);
+        }
+        // 3. Delete all tracking entries
+        await supabase.from('order_tracking').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        // 4. Delete all orders
+        await supabase.from('orders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      }
+      await fetchOrders();
+    } catch (err) {
+      console.error('Failed to reset:', err);
+      alert('Failed to reset orders.');
+    } finally {
+      setResetting(false);
+      setResetModal(false);
+    }
+  };
+
   const visibleOrders = orders.filter((o) => !skipped.has(o.id));
 
   const [printOrder, setPrintOrder] = useState<Order | null>(null);
@@ -118,13 +181,22 @@ export default function OrdersPage() {
           <h1 className="text-3xl font-extrabold text-white">Order Management</h1>
           <p className="text-gray-400 mt-1">Process and track customer orders.</p>
         </div>
-        <button
-          onClick={fetchOrders}
-          className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-gray-300 transition self-start"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2 self-start">
+          <button
+            onClick={fetchOrders}
+            className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-sm text-gray-300 transition"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+          <button
+            onClick={() => setResetModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-red-900/30 hover:bg-red-900/50 border border-red-800/50 rounded-lg text-sm text-red-400 font-bold transition"
+          >
+            <Trash2 size={14} />
+            Reset All
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 flex-wrap">
@@ -343,9 +415,85 @@ export default function OrdersPage() {
                     </button>
                   </div>
                 )}
+
+                {/* Delete Order - always visible */}
+                <div className="flex gap-3 flex-wrap mt-3 pt-3 border-t border-gray-800">
+                  <button
+                    disabled={processing === order.id}
+                    onClick={() => setDeleteModal(order.id)}
+                    className="flex items-center gap-2 px-4 py-2 bg-red-900/20 hover:bg-red-900/40 border border-red-800/50 rounded-lg text-red-400 text-sm font-medium transition"
+                  >
+                    <Trash2 size={14} />
+                    Delete Order
+                  </button>
+                </div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Delete Order Confirmation Modal */}
+      {deleteModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-900/50 rounded-full flex items-center justify-center">
+                <AlertTriangle size={20} className="text-red-400" />
+              </div>
+              <h3 className="text-xl font-bold text-white">Delete Order?</h3>
+            </div>
+            <p className="text-gray-400 text-sm mb-6">This will permanently delete this order and its receipt from storage. This action cannot be undone.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  const order = orders.find(o => o.id === deleteModal);
+                  if (order) handleDeleteOrder(order);
+                }}
+                disabled={processing === deleteModal}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition"
+              >
+                {processing === deleteModal ? 'Deleting...' : 'Delete Forever'}
+              </button>
+              <button
+                onClick={() => setDeleteModal(null)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium py-3 rounded-xl transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset All Confirmation Modal */}
+      {resetModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-red-800/50 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-900/50 rounded-full flex items-center justify-center">
+                <AlertTriangle size={20} className="text-red-400" />
+              </div>
+              <h3 className="text-xl font-bold text-red-400">⚠️ Nuclear Reset</h3>
+            </div>
+            <p className="text-gray-400 text-sm mb-2">This will <span className="text-red-400 font-bold">permanently delete ALL orders, tracking history, and receipt uploads</span> from your database and storage.</p>
+            <p className="text-red-400 text-xs font-bold mb-6">THIS CANNOT BE UNDONE. All statistics will be reset to zero.</p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleResetAll}
+                disabled={resetting}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition"
+              >
+                {resetting ? 'Resetting Everything...' : 'Yes, Delete Everything'}
+              </button>
+              <button
+                onClick={() => setResetModal(false)}
+                className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium py-3 rounded-xl transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
