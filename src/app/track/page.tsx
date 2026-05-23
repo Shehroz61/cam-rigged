@@ -28,16 +28,8 @@ function TrackOrderContent() {
     setError('');
     
     try {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchStr);
-
-      let orderQuery = supabase.from('orders').select('*');
-      if (isUuid) {
-        orderQuery = orderQuery.eq('id', searchStr);
-      } else {
-        orderQuery = orderQuery.eq('tracking_number', searchStr);
-      }
-
-      const { data: orderData, error: orderError } = await orderQuery.single();
+      const { data: ordersData, error: orderError } = await supabase.rpc('get_order_by_tracking', { search_track: searchStr });
+      const orderData = ordersData && ordersData.length > 0 ? ordersData[0] : null;
 
       if (orderError || !orderData) {
         setError('Order not found. Please check your Order ID.');

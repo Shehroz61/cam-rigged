@@ -5,6 +5,8 @@ import { supabase } from '@/lib/supabase';
 import { Product, useCartStore } from '@/store/cartStore';
 import Link from 'next/link';
 import { ShoppingCart, Package, TrendingUp } from 'lucide-react';
+import ProductModal from '@/components/ProductModal';
+import Image from 'next/image';
 
 export default function Home() {
   const { items, addToCart } = useCartStore();
@@ -14,13 +16,14 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   useEffect(() => {
     async function fetchData() {
       const productsRes = await supabase.from('products').select('*, categories(name)').eq('is_active', true).order('created_at', { ascending: false });
       const bundlesRes = await supabase.from('bundles').select('*, bundle_products(product_id, products(name, price_pkr, description, categories(name)))').order('created_at', { ascending: false });
       const categoriesRes = await supabase.from('categories').select('*').eq('active', true).order('name');
-      
+
       if (productsRes.data) setProducts(productsRes.data);
       if (bundlesRes.data) setBundles(bundlesRes.data);
       if (categoriesRes.data) setCategories(categoriesRes.data);
@@ -100,11 +103,10 @@ export default function Home() {
           <div className="flex gap-2 flex-wrap">
             <button
               onClick={() => setSelectedCategory('all')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
-                selectedCategory === 'all'
+              className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${selectedCategory === 'all'
                   ? 'bg-blue-600 border-blue-600 text-white'
                   : 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-white'
-              }`}
+                }`}
             >
               All
             </button>
@@ -112,11 +114,10 @@ export default function Home() {
               <button
                 key={cat.id}
                 onClick={() => setSelectedCategory(cat.id)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${
-                  selectedCategory === cat.id
+                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${selectedCategory === cat.id
                     ? 'bg-blue-600 border-blue-600 text-white'
                     : 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-white'
-                }`}
+                  }`}
               >
                 {cat.name}
               </button>
@@ -223,21 +224,25 @@ export default function Home() {
               return (
                 <div
                   key={product.id}
-                  className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl p-6 hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)] transition-all duration-300 group flex flex-col"
+                  className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-2xl p-6 hover:border-blue-500/50 hover:shadow-[0_0_30px_rgba(59,130,246,0.15)] transition-all duration-300 group flex flex-col cursor-pointer"
+                  onClick={() => setSelectedProduct(product)}
                 >
                   {product.image_url && (
-                    <img
-                      src={product.image_url}
-                      alt={product.name}
-                      className="w-full h-48 object-cover rounded-xl mb-4"
-                    />
+                    <div className="relative w-full h-48 mb-4">
+                      <Image
+                        src={product.image_url}
+                        alt={product.name}
+                        fill
+                        className="object-cover rounded-xl"
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                      />
+                    </div>
                   )}
                   <div className="flex justify-between items-start mb-4">
-                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${
-                      (product as any).categories?.name 
-                        ? 'bg-blue-900/50 text-blue-300 border border-blue-700' 
+                    <span className={`text-xs font-bold px-3 py-1 rounded-full ${(product as any).categories?.name
+                        ? 'bg-blue-900/50 text-blue-300 border border-blue-700'
                         : 'bg-gray-700 text-gray-400 border border-gray-600'
-                    }`}>
+                      }`}>
                       {(product as any).categories?.name || 'Uncategorized'}
                     </span>
                     {product.discount_percent > 0 && (
@@ -269,13 +274,15 @@ export default function Home() {
                   </div>
 
                   <button
-                    onClick={() => addToCart(product)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      addToCart(product);
+                    }}
                     disabled={inCart}
-                    className={`w-full py-3 rounded-xl font-bold transition-all ${
-                      inCart
+                    className={`w-full py-3 rounded-xl font-bold transition-all ${inCart
                         ? 'bg-green-900/50 text-green-400 border border-green-700 cursor-default'
                         : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-blue-500/25'
-                    }`}
+                      }`}
                   >
                     {inCart ? '✓ In Cart' : 'Add to Cart'}
                   </button>
@@ -299,6 +306,19 @@ export default function Home() {
         </div>
         <p>© {new Date().getFullYear()} CamRigged. All rights reserved.</p>
       </footer>
+
+      {selectedProduct && (
+        <ProductModal
+          product={selectedProduct}
+          isOpen={!!selectedProduct}
+          onClose={() => setSelectedProduct(null)}
+          onAddToCart={(p) => {
+            addToCart(p);
+            setSelectedProduct(null);
+          }}
+          inCart={items.some((item) => item.id === selectedProduct.id)}
+        />
+      )}
     </div>
   );
 }

@@ -10,19 +10,19 @@ export default function CheckoutPage() {
   const { items, removeFromCart, updateQuantity, getTotal } = useCartStore();
   const router = useRouter();
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [paymentMethods, setPaymentMethods] = useState<{id: string, name: string, details: string}[]>([]);
   const [paymentMethod, setPaymentMethod] = useState('jazzcash_account');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success'>('idle');
   const [orderId, setOrderId] = useState<string>('');
   const [orderSnapshot, setOrderSnapshot] = useState<any>(null);
-  
+
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [city, setCity] = useState('');
   const [postalCode, setPostalCode] = useState('');
-  const [transactionId, setTransactionId] = useState('');
   const [file, setFile] = useState<File | null>(null);
 
   useEffect(() => {
@@ -32,6 +32,17 @@ export default function CheckoutPage() {
         const settingsMap: Record<string, string> = {};
         data.forEach((s) => {
           settingsMap[s.key] = s.value;
+          if (s.key === 'payment_methods') {
+            try {
+              const methods = JSON.parse(s.value);
+              setPaymentMethods(methods);
+              if (methods.length > 0) {
+                setPaymentMethod(methods[0].id); // Default to first available dynamic method
+              }
+            } catch (e) {
+              console.error("Failed to parse payment methods", e);
+            }
+          }
         });
         setSettings(settingsMap);
       }
@@ -49,29 +60,29 @@ export default function CheckoutPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!customerName || !customerPhone || !deliveryAddress || !city) {
       alert('Please fill all required delivery fields.');
       return;
     }
-    
+
     if (!meetsMinOrder) {
       alert(`Minimum order amount is Rs. ${minOrderThreshold}. Your current subtotal is Rs. ${subtotal.toFixed(2)}.`);
       return;
     }
-    
-    if (!transactionId || !file) {
-      alert('Please provide transaction ID and receipt screenshot.');
+
+    if (!file) {
+      alert('Please provide receipt screenshot.');
       return;
     }
-    
+
     if (items.length === 0) {
       alert('Your cart is empty.');
       return;
     }
-    
+
     setIsSubmitting(true);
-    
+
     try {
       const fileExt = file.name.split('.').pop();
       const fileName = `${Date.now()}-${Math.random()}.${fileExt}`;
@@ -82,7 +93,7 @@ export default function CheckoutPage() {
       if (uploadError) {
         throw new Error('Failed to upload receipt.');
       }
-      
+
       const { data: publicUrlData } = supabase.storage
         .from('receipts')
         .getPublicUrl(fileName);
@@ -91,7 +102,7 @@ export default function CheckoutPage() {
 
       const productIds: string[] = [];
       const bundleIds: string[] = [];
-      
+
       items.forEach(item => {
         if (item.type === 'product') {
           productIds.push(item.id);
@@ -101,8 +112,10 @@ export default function CheckoutPage() {
       });
 
       const trackingNumber = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const orderId = crypto.randomUUID();
 
       const orderData = {
+        id: orderId,
         customer_name: customerName,
         customer_email: customerEmail || null,
         customer_phone: customerPhone,
@@ -115,20 +128,17 @@ export default function CheckoutPage() {
         subtotal: subtotal,
         discount_amount: 0,
         total_amount: total,
-        transaction_id: transactionId,
         screenshot_url: screenshotUrl,
-        payment_method: paymentMethod,
+        payment_method: paymentMethods.find(m => m.id === paymentMethod)?.name || paymentMethod,
         status: 'pending',
         tracking_number: trackingNumber,
       };
 
-      const { data: orderResult, error: orderError } = await supabase.from('orders').insert([orderData]).select();
+      const { error: orderError } = await supabase.from('orders').insert([orderData]);
 
       if (orderError) {
-        throw new Error('Failed to create order.');
+        throw new Error(`Failed to create order: ${orderError.message}`);
       }
-
-      const orderId = orderResult[0].id;
 
       // Create tracking entry
       await supabase.from('order_tracking').insert({
@@ -164,49 +174,49 @@ export default function CheckoutPage() {
   };
 
   if (status === 'success' && orderSnapshot) {
-  const shortOrderId = orderId ? orderId.slice(0, 8) : '';
-  return (
-    <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-8 flex flex-col items-center">
-      <div className="bg-gray-800 p-8 rounded-lg shadow-xl text-center max-w-2xl w-full mb-8 print:hidden">
-        <div className="w-16 h-16 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-        </div>
-        <h2 className="text-2xl font-bold text-green-400 mb-4">Order Placed Successfully!</h2>
-        <p className="text-gray-300 mb-2">
-          Your Order ID:
-        </p>
-        <p className="text-2xl font-mono font-bold text-white mb-6 bg-gray-900 py-3 px-4 rounded-lg inline-block w-full">
-          {orderId}
-        </p>
-        <p className="text-gray-300 mb-6">
-          Save this ID to track your order. We will verify your payment and deliver the products to your address.
-        </p>
-        <div className="flex flex-wrap gap-3 justify-center">
-          <button 
-            onClick={() => router.push(`/track?id=${orderId}`)}
-            className="px-6 py-2 border border-gray-600 rounded-lg hover:bg-gray-700 transition"
-          >
-            Track Order
-          </button>
-          <button 
-            onClick={() => router.push('/')}
-            className="px-6 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition"
-          >
-            Continue Shopping
-          </button>
+    const shortOrderId = orderId ? orderId.slice(0, 8) : '';
+    return (
+      <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-8 flex flex-col items-center">
+        <div className="bg-gray-800 p-8 rounded-lg shadow-xl text-center max-w-2xl w-full mb-8 print:hidden">
+          <div className="w-16 h-16 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h2 className="text-2xl font-bold text-green-400 mb-4">Order Placed Successfully!</h2>
+          <p className="text-gray-300 mb-2">
+            Your Order ID:
+          </p>
+          <p className="text-2xl font-mono font-bold text-white mb-6 bg-gray-900 py-3 px-4 rounded-lg inline-block w-full">
+            {orderId}
+          </p>
+          <p className="text-gray-300 mb-6">
+            Save this ID to track your order. We will verify your payment and deliver the products to your address.
+          </p>
+          <div className="flex flex-wrap gap-3 justify-center">
+            <button
+              onClick={() => router.push(`/track?id=${orderId}`)}
+              className="px-6 py-2 border border-gray-600 rounded-lg hover:bg-gray-700 transition"
+            >
+              Track Order
+            </button>
+            <button
+              onClick={() => router.push('/')}
+              className="px-6 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition"
+            >
+              Continue Shopping
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-900 text-white p-4 sm:p-8">
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold mb-8">Checkout</h1>
-        
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-6">
             <div className="bg-gray-800 p-6 rounded-xl">
@@ -214,7 +224,7 @@ export default function CheckoutPage() {
                 <ShoppingCart size={20} />
                 Cart Summary
               </h2>
-              
+
               {items.length === 0 ? (
                 <p className="text-gray-400">Your cart is empty.</p>
               ) : (
@@ -263,33 +273,46 @@ export default function CheckoutPage() {
                 Payment Method
               </h2>
               <div className="space-y-3">
-                <div
-                  className={`p-4 rounded-lg border cursor-pointer ${
-                    paymentMethod === 'jazzcash_account' ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700'
-                  }`}
-                  onClick={() => setPaymentMethod('jazzcash_account')}
-                >
-                  <p className="font-semibold text-blue-400">JazzCash</p>
-                  <p className="text-sm text-gray-400">{settings.jazzcash_account}</p>
-                </div>
-                <div
-                  className={`p-4 rounded-lg border cursor-pointer ${
-                    paymentMethod === 'bank_transfer' ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700'
-                  }`}
-                  onClick={() => setPaymentMethod('bank_transfer')}
-                >
-                  <p className="font-semibold text-blue-400">Bank Transfer</p>
-                  <p className="text-sm text-gray-400">{settings.bank_transfer}</p>
-                </div>
-                <div
-                  className={`p-4 rounded-lg border cursor-pointer ${
-                    paymentMethod === 'usdt_trc20' ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700'
-                  }`}
-                  onClick={() => setPaymentMethod('usdt_trc20')}
-                >
-                  <p className="font-semibold text-blue-400">USDT (TRC20)</p>
-                  <p className="text-sm text-gray-400 break-all">{settings.usdt_trc20}</p>
-                </div>
+                {paymentMethods.length > 0 ? (
+                  paymentMethods.map((method) => (
+                    <div
+                      key={method.id}
+                      className={`p-4 rounded-lg border cursor-pointer ${paymentMethod === method.id ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700'
+                        }`}
+                      onClick={() => setPaymentMethod(method.id)}
+                    >
+                      <p className="font-semibold text-blue-400">{method.name}</p>
+                      <p className="text-sm text-gray-400 whitespace-pre-wrap">{method.details}</p>
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    <div
+                      className={`p-4 rounded-lg border cursor-pointer ${paymentMethod === 'jazzcash_account' ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700'
+                        }`}
+                      onClick={() => setPaymentMethod('jazzcash_account')}
+                    >
+                      <p className="font-semibold text-blue-400">JazzCash</p>
+                      <p className="text-sm text-gray-400">{settings.jazzcash_account}</p>
+                    </div>
+                    <div
+                      className={`p-4 rounded-lg border cursor-pointer ${paymentMethod === 'bank_transfer' ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700'
+                        }`}
+                      onClick={() => setPaymentMethod('bank_transfer')}
+                    >
+                      <p className="font-semibold text-blue-400">{settings.custom_bank_name || 'Bank Transfer'}</p>
+                      <p className="text-sm text-gray-400">{settings.custom_bank_details || settings.bank_transfer}</p>
+                    </div>
+                    <div
+                      className={`p-4 rounded-lg border cursor-pointer ${paymentMethod === 'usdt_trc20' ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700'
+                        }`}
+                      onClick={() => setPaymentMethod('usdt_trc20')}
+                    >
+                      <p className="font-semibold text-blue-400">USDT (TRC20)</p>
+                      <p className="text-sm text-gray-400 break-all">{settings.usdt_trc20}</p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -367,17 +390,6 @@ export default function CheckoutPage() {
             <div className="bg-gray-800 p-6 rounded-xl">
               <h2 className="text-xl font-bold mb-4">Payment Confirmation</h2>
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm text-gray-400 mb-1">Transaction ID *</label>
-                  <input
-                    type="text"
-                    value={transactionId}
-                    onChange={(e) => setTransactionId(e.target.value)}
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500"
-                    placeholder="e.g. 1234567890"
-                    required
-                  />
-                </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Receipt Screenshot *</label>
                   <input

@@ -2,10 +2,17 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Settings, Save, CreditCard, Building2, Coins, Store, Globe } from 'lucide-react';
+import { Settings, Save, CreditCard, Store, Globe, Plus, Trash2 } from 'lucide-react';
+
+interface PaymentMethod {
+  id: string;
+  name: string;
+  details: string;
+}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -15,7 +22,16 @@ export default function SettingsPage() {
       const { data } = await supabase.from('site_settings').select('*');
       if (data) {
         const s: Record<string, string> = {};
-        data.forEach((row) => (s[row.key] = row.value));
+        data.forEach((row) => {
+          s[row.key] = row.value;
+          if (row.key === 'payment_methods') {
+            try {
+              setPaymentMethods(JSON.parse(row.value));
+            } catch (e) {
+              console.error("Failed to parse payment methods", e);
+            }
+          }
+        });
         setSettings(s);
       }
       setLoading(false);
@@ -27,11 +43,11 @@ export default function SettingsPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      for (const key of Object.keys(settings)) {
+      const updatedSettings = { ...settings, payment_methods: JSON.stringify(paymentMethods) };
+      for (const key of Object.keys(updatedSettings)) {
         await supabase
           .from('site_settings')
-          .update({ value: settings[key] })
-          .eq('key', key);
+          .upsert({ key, value: updatedSettings[key] });
       }
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -40,32 +56,17 @@ export default function SettingsPage() {
     }
   };
 
-  const paymentFields = [
-    {
-      key: 'jazzcash_account',
-      label: 'JazzCash Account',
-      icon: CreditCard,
-      placeholder: '03001234567 - Account Name',
-      hint: 'Mobile number and account holder name',
-      color: 'text-red-400',
-    },
-    {
-      key: 'bank_transfer',
-      label: 'Bank Transfer',
-      icon: Building2,
-      placeholder: 'Bank Name - Account Number - Account Name',
-      hint: 'Full bank details for transfer',
-      color: 'text-blue-400',
-    },
-    {
-      key: 'usdt_trc20',
-      label: 'USDT Wallet (TRC20)',
-      icon: Coins,
-      placeholder: 'TRC20 wallet address',
-      hint: 'USDT TRC20 wallet address for crypto payments',
-      color: 'text-green-400',
-    },
-  ];
+  const addPaymentMethod = () => {
+    setPaymentMethods([...paymentMethods, { id: crypto.randomUUID(), name: '', details: '' }]);
+  };
+
+  const removePaymentMethod = (id: string) => {
+    setPaymentMethods(paymentMethods.filter(p => p.id !== id));
+  };
+
+  const updatePaymentMethod = (id: string, field: keyof PaymentMethod, value: string) => {
+    setPaymentMethods(paymentMethods.map(p => p.id === id ? { ...p, [field]: value } : p));
+  };
 
   const shippingFields = [
     {
@@ -106,7 +107,7 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 max-w-4xl pb-20">
       <div>
         <h1 className="text-3xl font-extrabold text-white">Settings</h1>
         <p className="text-gray-400 mt-1">Configure payment, shipping, and site settings.</p>
@@ -119,30 +120,61 @@ export default function SettingsPage() {
       ) : (
         <form onSubmit={handleSave} className="space-y-6">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
-            <div className="flex items-center gap-3 px-6 py-4 border-b border-gray-800">
-              <CreditCard size={16} className="text-gray-400" />
-              <h2 className="font-bold text-white">Payment Methods</h2>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+              <div className="flex items-center gap-3">
+                <CreditCard size={16} className="text-gray-400" />
+                <h2 className="font-bold text-white">Payment Methods</h2>
+              </div>
+              <button
+                type="button"
+                onClick={addPaymentMethod}
+                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded-lg text-sm font-semibold transition"
+              >
+                <Plus size={16} />
+                Add Method
+              </button>
             </div>
-            <div className="p-6 space-y-5">
-              {paymentFields.map((field) => {
-                const Icon = field.icon;
-                return (
-                  <div key={field.key}>
-                    <label className="flex items-center gap-2 text-sm font-medium text-gray-300 mb-2">
-                      <Icon size={14} className={field.color} />
-                      {field.label}
-                    </label>
-                    <input
-                      type="text"
-                      value={settings[field.key] || ''}
-                      onChange={(e) => setSettings({ ...settings, [field.key]: e.target.value })}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition"
-                      placeholder={field.placeholder}
-                    />
-                    <p className="text-xs text-gray-500 mt-1.5">{field.hint}</p>
+            <div className="p-6 space-y-4">
+              {paymentMethods.length === 0 ? (
+                <p className="text-gray-500 text-sm italic">No payment methods configured. Add one to allow checkouts.</p>
+              ) : (
+                paymentMethods.map((method, index) => (
+                  <div key={method.id} className="p-4 bg-gray-800/50 border border-gray-700 rounded-xl flex gap-4 relative">
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-400 mb-1">Method Name</label>
+                        <input
+                          type="text"
+                          value={method.name}
+                          onChange={(e) => updatePaymentMethod(method.id, 'name', e.target.value)}
+                          className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 transition text-sm"
+                          placeholder="e.g. Meezan Bank, JazzCash, USDT"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-400 mb-1">Details / Account Info</label>
+                        <input
+                          type="text"
+                          value={method.details}
+                          onChange={(e) => updatePaymentMethod(method.id, 'details', e.target.value)}
+                          className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 transition text-sm"
+                          placeholder="e.g. Account No / Title / Wallet Address"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removePaymentMethod(method.id)}
+                      className="p-2 text-red-400 hover:bg-red-400/10 rounded-lg self-start transition"
+                      title="Remove Payment Method"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </div>
-                );
-              })}
+                ))
+              )}
             </div>
           </div>
 

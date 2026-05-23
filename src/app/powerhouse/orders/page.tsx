@@ -202,7 +202,7 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                   <div className="bg-gray-800/60 rounded-lg p-3">
                     <p className="text-xs text-gray-500 mb-1">Phone</p>
                     <p className="font-medium text-white">{order.customer_phone}</p>
@@ -214,6 +214,10 @@ export default function OrdersPage() {
                   <div className="bg-gray-800/60 rounded-lg p-3">
                     <p className="text-xs text-gray-500 mb-1">Total</p>
                     <p className="font-bold text-white">Rs. {order.total_amount}</p>
+                  </div>
+                  <div className="bg-gray-800/60 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 mb-1">Payment Method</p>
+                    <p className="font-medium text-blue-400">{order.payment_method?.replace('_', ' ').toUpperCase() || 'N/A'}</p>
                   </div>
                 </div>
 
